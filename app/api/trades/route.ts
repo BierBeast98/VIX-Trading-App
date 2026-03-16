@@ -65,9 +65,10 @@ export async function POST(req: NextRequest) {
       positionId = position.id;
     }
 
+    const { positionId: _ignoredPosId, entryDate: _ed, exitDate: _exd, ...restParsed } = parsed;
     const trade = await prisma.trade.create({
       data: {
-        ...parsed,
+        ...restParsed,
         ...(positionId ? { positionId } : {}),
         entryDate: new Date(parsed.entryDate),
         exitDate: parsed.exitDate ? new Date(parsed.exitDate) : null,
