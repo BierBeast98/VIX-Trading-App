@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     const trade = await prisma.trade.create({
       data: {
         ...parsed,
-        positionId,
+        ...(positionId ? { positionId } : {}),
         entryDate: new Date(parsed.entryDate),
         exitDate: parsed.exitDate ? new Date(parsed.exitDate) : null,
         returnPct: autoReturnPct,
