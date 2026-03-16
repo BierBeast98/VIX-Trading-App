@@ -65,23 +65,34 @@ export async function POST(req: NextRequest) {
       positionId = position.id;
     }
 
-    const { positionId: _ignoredPosId, entryDate: _ed, exitDate: _exd, ...restParsed } = parsed;
-    const trade = await prisma.trade.create({
-      data: {
-        ...restParsed,
-        ...(positionId ? { positionId } : {}),
-        entryDate: new Date(parsed.entryDate),
-        exitDate: parsed.exitDate ? new Date(parsed.exitDate) : null,
-        returnPct: autoReturnPct,
-        holdDays:
-          parsed.exitDate
-            ? Math.ceil(
-                (new Date(parsed.exitDate).getTime() - new Date(parsed.entryDate).getTime()) /
-                  (1000 * 60 * 60 * 24)
-              )
-            : null,
-      },
-    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tradeData: any = {
+      certificateId: parsed.certificateId,
+      direction: parsed.direction,
+      entryDate: new Date(parsed.entryDate),
+      exitDate: parsed.exitDate ? new Date(parsed.exitDate) : null,
+      entryVix: parsed.entryVix ?? null,
+      exitVix: parsed.exitVix ?? null,
+      barrierLevel: parsed.barrierLevel,
+      strikePrice: parsed.strikePrice ?? null,
+      leverageRatio: parsed.leverageRatio ?? null,
+      ratio: parsed.ratio ?? null,
+      entryPrice: parsed.entryPrice ?? null,
+      exitPrice: parsed.exitPrice ?? null,
+      quantity: parsed.quantity ?? null,
+      returnPct: autoReturnPct,
+      holdDays: parsed.exitDate
+        ? Math.ceil(
+            (new Date(parsed.exitDate).getTime() - new Date(parsed.entryDate).getTime()) /
+              (1000 * 60 * 60 * 24)
+          )
+        : null,
+      alertTriggered: parsed.alertTriggered,
+      notes: parsed.notes,
+    };
+    if (positionId) tradeData.positionId = positionId;
+
+    const trade = await prisma.trade.create({ data: tradeData });
 
     return NextResponse.json(trade, { status: 201 });
   } catch (err) {
