@@ -1,0 +1,333 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import useSWR from "swr";
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
+} from "recharts";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { formatPct, formatNumber } from "@/lib/utils";
+import { runBacktest, suggestPositionSize } from "@/lib/analytics";
+
+interface Metrics {
+  totalTrades: number;
+  closedTrades: number;
+  winCount: number;
+  lossCount: number;
+  winRate: number;
+  avgReturn: number;
+  avgWin: number;
+  avgLoss: number;
+  avgHoldDays: number;
+  sharpeRatio: number;
+  bestTrade: number;
+  worstTrade: number;
+  totalReturn: number;
+  alertTriggeredCount: number;
+}
+
+interface EntryBucket {
+  range: string;
+  count: number;
+  avgReturn: number;
+  winRate: number;
+}
+
+interface AnalyticsData {
+  metrics: Metrics;
+  entryAnalysis: EntryBucket[];
+  riskBudget: number;
+}
+
+export default function AnalyticsPage() {
+  const { data, isLoading: loading } = useSWR<AnalyticsData>("/api/analytics");
+
+  // Backtesting state
+  const [btThreshold, setBtThreshold] = useState("15");
+  const [btExitThreshold, setBtExitThreshold] = useState("20");
+  const [btHoldDays, setBtHoldDays] = useState("10");
+  const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
+  const [btRunning, setBtRunning] = useState(false);
+
+  // Position sizing state
+  const [psVix, setPsVix] = useState("15");
+  const [psBudget, setPsBudget] = useState("");
+  const [psResult, setPsResult] = useState<ReturnType<typeof suggestPositionSize> | null>(null);
+
+  const runBt = async () => {
+    setBtRunning(true);
+    const res = await fetch(`/api/vix/historical?period=1y`);
+    if (res.ok) {
+      const histData = await res.json();
+      const result = runBacktest(
+        histData.vix || [],
+        parseFloat(btThreshold),
+        parseFloat(btExitThreshold),
+        parseInt(btHoldDays)
+      );
+      setBtResult(result);
+    }
+    setBtRunning(false);
+  };
+
+  const calcPositionSize = () => {
+    const budget = parseFloat(psBudget) || data?.riskBudget || 10000;
+    const result = suggestPositionSize(budget, parseFloat(psVix), 18);
+    setPsResult(result);
+  };
+
+  useEffect(() => {
+    if (data) setPsBudget(String(data.riskBudget));
+  }, [data]);
+
+  const m = data?.metrics;
+
+  const kpis = m ? [
+    { label: "Win Rate", value: formatPct(m.winRate * 100, 0), color: m.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" },
+    { label: "Ø Rendite", value: formatPct(m.avgReturn), color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" },
+    { label: "Ø Haltetage", value: `${m.avgHoldDays.toFixed(1)}d`, color: "#8B8FA8" },
+    { label: "Sharpe Ratio", value: formatNumber(m.sharpeRatio, 2), color: m.sharpeRatio >= 1 ? "#22C55E" : "#F59E0B" },
+    { label: "Bester Trade", value: formatPct(m.bestTrade), color: "#22C55E" },
+    { label: "Schlechtester Trade", value: formatPct(m.worstTrade), color: "#FF4D4D" },
+    { label: "Gesamtrendite", value: formatPct(m.totalReturn), color: m.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" },
+    { label: "Alert-getriggert", value: `${m.alertTriggeredCount}/${m.closedTrades}`, color: "#B8E15A" },
+  ] : [];
+
+  return (
+    <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
+      <h1 className="text-2xl font-bold text-white">Analytics</h1>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
+        </div>
+      ) : (
+        <>
+          {/* KPIs */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {kpis.map(({ label, value, color }) => (
+              <Card key={label}>
+                <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>{label}</div>
+                <div className="text-2xl font-bold" style={{ color }}>{value}</div>
+              </Card>
+            ))}
+          </div>
+
+          {/* Entry Level Analysis */}
+          {data?.entryAnalysis && data.entryAnalysis.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-white">Einstiegslevel-Analyse</CardTitle>
+              </CardHeader>
+              <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
+                Durchschnittliche Rendite nach VIX-Einstiegslevel
+              </p>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={data.entryAnalysis} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E1E28" vertical={false} />
+                  <XAxis dataKey="range" tick={{ fill: "#8B8FA8", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#8B8FA8", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                  <Tooltip
+                    contentStyle={{ background: "#1A1A22", border: "1px solid #2E2E3A", borderRadius: "12px" }}
+                    labelStyle={{ color: "#8B8FA8" }}
+                    formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Ø Rendite"]}
+                  />
+                  <Bar dataKey="avgReturn" radius={[4, 4, 0, 0]}>
+                    {data.entryAnalysis.map((entry, i) => (
+                      <Cell
+                        key={i}
+                        fill={entry.avgReturn >= 0 ? "#B8E15A" : "#FF4D4D"}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          )}
+
+          {/* Backtesting + Position Sizing */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+            {/* Backtesting */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-white">Backtesting (1 Jahr)</CardTitle>
+              </CardHeader>
+              <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
+                Simuliert Einstiege wenn VIX ≤ Schwelle, Ausstieg nach X Tagen
+              </p>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Input
+                    label="Einsteigs-Schwelle"
+                    type="number"
+                    step="0.5"
+                    value={btThreshold}
+                    onChange={(e) => setBtThreshold(e.target.value)}
+                  />
+                  <Input
+                    label="Exit-Schwelle (VIX)"
+                    type="number"
+                    step="0.5"
+                    value={btExitThreshold}
+                    onChange={(e) => setBtExitThreshold(e.target.value)}
+                  />
+                  <Input
+                    label="Haltetage (max)"
+                    type="number"
+                    value={btHoldDays}
+                    onChange={(e) => setBtHoldDays(e.target.value)}
+                  />
+                </div>
+                <Button variant="primary" size="sm" onClick={runBt} loading={btRunning}>
+                  Backtest starten
+                </Button>
+
+                {btResult && (
+                  <div className="rounded-xl p-4 space-y-2 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                    <div className="text-xs font-medium" style={{ color: "#B8E15A" }}>
+                      Ergebnis: {btResult.period}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Simulierte Trades: </span>
+                        <span className="text-white font-medium">{btResult.tradesSimulated}</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Win Rate: </span>
+                        <span style={{ color: btResult.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" }}>
+                          {(btResult.winRate * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Ø Rendite: </span>
+                        <span style={{ color: btResult.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                          {btResult.avgReturn.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Gesamtrendite: </span>
+                        <span style={{ color: btResult.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                          {btResult.totalReturn.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Max Drawdown: </span>
+                        <span style={{ color: "#FF4D4D" }}>-{btResult.maxDrawdown.toFixed(1)}%</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Bester Einstieg Ø: </span>
+                        <span className="text-white">{btResult.bestEntry.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            {/* Position Sizing */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-white">Positionsgrößen-Rechner</CardTitle>
+              </CardHeader>
+              <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
+                Empfohlene Positionsgröße basierend auf VIX-Level und Risikobudget
+              </p>
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Input
+                    label="Aktueller VIX"
+                    type="number"
+                    step="0.5"
+                    value={psVix}
+                    onChange={(e) => setPsVix(e.target.value)}
+                  />
+                  <Input
+                    label="Risikobudget (€)"
+                    type="number"
+                    value={psBudget}
+                    onChange={(e) => setPsBudget(e.target.value)}
+                  />
+                </div>
+                <Button variant="primary" size="sm" onClick={calcPositionSize}>
+                  Berechnen
+                </Button>
+
+                {psResult && (
+                  <div className="rounded-xl p-4 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                    <div className="text-3xl font-bold mb-2" style={{ color: "#B8E15A" }}>
+                      €{psResult.allocation.toLocaleString("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <p className="text-sm" style={{ color: "#8B8FA8" }}>{psResult.reason}</p>
+                  </div>
+                )}
+
+                {/* VIX allocation guide */}
+                <div className="mt-4 space-y-1.5">
+                  {[
+                    { range: "≤ 14", pct: "30%", color: "#22C55E" },
+                    { range: "14–16", pct: "40%", color: "#B8E15A" },
+                    { range: "16–20", pct: "50%", color: "#F59E0B" },
+                    { range: "20–25", pct: "65%", color: "#F97316" },
+                    { range: "25–30", pct: "75%", color: "#EF4444" },
+                    { range: "> 30", pct: "60%", color: "#DC2626" },
+                  ].map((row) => (
+                    <div key={row.range} className="flex justify-between text-xs">
+                      <span style={{ color: "#8B8FA8" }}>VIX {row.range}</span>
+                      <span style={{ color: row.color }} className="font-medium">{row.pct}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Behavioral Insights */}
+          {m && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-white">Verhaltens-Analyse</CardTitle>
+              </CardHeader>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-2" style={{ color: "#8B8FA8" }}>Alert-Nutzung</div>
+                  <div className="text-xl font-bold" style={{ color: "#B8E15A" }}>
+                    {m.closedTrades > 0
+                      ? `${((m.alertTriggeredCount / m.closedTrades) * 100).toFixed(0)}%`
+                      : "—"
+                    }
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#8B8FA8" }}>
+                    der Trades durch Alert ausgelöst
+                  </div>
+                </div>
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-2" style={{ color: "#8B8FA8" }}>Ø Gewinnauftrag</div>
+                  <div className="text-xl font-bold" style={{ color: "#22C55E" }}>
+                    {m.avgWin > 0 ? formatPct(m.avgWin) : "—"}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#8B8FA8" }}>
+                    durchschnittlicher Gewinn
+                  </div>
+                </div>
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-2" style={{ color: "#8B8FA8" }}>Risiko/Reward</div>
+                  <div className="text-xl font-bold" style={{ color: "#F59E0B" }}>
+                    {m.avgLoss < 0 && m.avgWin > 0
+                      ? `1:${(m.avgWin / Math.abs(m.avgLoss)).toFixed(1)}`
+                      : "—"
+                    }
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#8B8FA8" }}>
+                    Win/Loss Verhältnis
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

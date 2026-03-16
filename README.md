@@ -1,8 +1,30 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VIX Trading Dashboard
 
-## Getting Started
+Persönliches VIX-Monitoring und Trading-Dashboard für Moritz.
 
-First, run the development server:
+## Setup
+
+### 1. Supabase (Datenbank)
+1. Gehe zu [supabase.com](https://supabase.com) und erstelle ein Projekt
+2. Gehe zu **Project Settings → Database → Connection string**
+3. Kopiere den "Transaction" URL → `DATABASE_URL` und "Direct connection" URL → `DIRECT_URL`
+
+### 2. Resend (E-Mail Alerts)
+1. Gehe zu [resend.com](https://resend.com) und erstelle einen API Key
+2. Verifiziere deine Domain (oder nutze `onboarding@resend.dev` zum Testen)
+
+### 3. Umgebungsvariablen
+```bash
+cp .env.example .env.local
+# Fülle alle Werte aus
+```
+
+### 4. Datenbank initialisieren
+```bash
+npx prisma db push
+```
+
+### 5. Lokale Entwicklung
 
 ```bash
 npm run dev

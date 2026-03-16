@@ -1,0 +1,102 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Settings {
+  id                 Int      @id @default(1)
+  alertEmail         String   @default("")
+  vixLowThreshold    Float    @default(14.5)
+  vixHighThreshold   Float    @default(30.0)
+  stdDevMultiplier   Float    @default(2.0)
+  rollingWindowDays  Int      @default(30)
+  targetReturnPct    Float    @default(18.0)
+  trailingStopConfig Json     @default("{\"enabled\": true, \"stepPct\": 5}")
+  riskBudget         Float    @default(10000)
+  barrierWarningPct  Float    @default(10.0)
+  spikeThresholdPct  Float    @default(15.0)
+  vontobelIsin       String   @default("DE000VJ4MNF2")
+  updatedAt          DateTime @updatedAt
+}
+
+model Position {
+  id             String   @id @default(cuid())
+  certificateId  String
+  name           String   @default("")
+  entryVix       Float    @default(0)
+  entryPrice     Float
+  barrierLevel   Float
+  currentBarrier Float
+  leverageRatio  Float
+  direction          String   @default("short")
+  currentPrice       Float    @default(0)
+  trailingStopFloor  Float?
+  peakPnlPct         Float?
+  status             String   @default("open")
+  notes              String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  trades         Trade[]
+}
+
+model Trade {
+  id             String    @id @default(cuid())
+  positionId     String?
+  position       Position? @relation(fields: [positionId], references: [id])
+  certificateId  String
+  direction      String    @default("short")
+  entryDate      DateTime
+  exitDate       DateTime?
+  entryVix       Float    @default(0)
+  exitVix        Float?
+  barrierLevel   Float
+  strikePrice    Float?
+  leverageRatio  Float?
+  ratio          Float?
+  entryPrice     Float?
+  exitPrice      Float?
+  quantity       Int?
+  returnPct      Float?
+  holdDays       Int?
+  alertTriggered Boolean   @default(false)
+  notes          String    @default("")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model AlertLog {
+  id           String   @id @default(cuid())
+  alertType    String
+  message      String
+  vixLevel     Float?
+  sentAt       DateTime @default(now())
+  acknowledged Boolean  @default(false)
+}
+
+model VixCache {
+  id        String   @id @default("spot")
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+model VixIntraday {
+  id        String   @id @default(cuid())
+  symbol    String   // "VIX" or "FUTURES"
+  timestamp DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float    @default(0)
+
+  @@unique([symbol, timestamp])
+  @@index([symbol, timestamp])
+}
