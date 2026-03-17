@@ -46,7 +46,22 @@ const typeEmoji: Record<string, string> = {
   nfp: "👔",
   consumer_confidence: "📈",
   gdp: "🏛",
+  ecb_meeting: "🏦",
+  boe_meeting: "🏦",
+  boj_meeting: "🏦",
+  pmi: "🏭",
+  ifo: "📉",
+  zew: "📉",
   other: "📅",
+};
+
+const countryFlag: Record<string, string> = {
+  US: "🇺🇸",
+  EU: "🇪🇺",
+  DE: "🇩🇪",
+  GB: "🇬🇧",
+  JP: "🇯🇵",
+  CN: "🇨🇳",
 };
 
 export default function CalendarPage() {
@@ -217,6 +232,7 @@ export default function CalendarPage() {
                             <span className="text-lg">{typeEmoji[ev.type] ?? "📅"}</span>
                             <div className="flex-1">
                               <div className="flex items-center gap-2">
+                                <span className="text-sm">{countryFlag[ev.country] ?? ""}</span>
                                 <span className="text-sm font-medium text-white">{ev.title}</span>
                                 {ev.time && <span className="text-xs" style={{ color: "#8B8FA8" }}>{ev.time} Uhr</span>}
                               </div>
@@ -255,7 +271,9 @@ export default function CalendarPage() {
                         style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}
                       >
                         <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-xs font-medium text-white line-clamp-1">{ev.title}</span>
+                          <span className="text-xs font-medium text-white line-clamp-1">
+                            {countryFlag[ev.country] ?? ""} {ev.title}
+                          </span>
                           <Badge variant={ev.impact === "high" ? "danger" : ev.impact === "medium" ? "warning" : "success"}>
                             {ev.impact === "high" ? "Hoch" : ev.impact === "medium" ? "Mittel" : "Niedrig"}
                           </Badge>
@@ -276,10 +294,19 @@ export default function CalendarPage() {
                 </CardHeader>
                 <div className="space-y-2">
                   {[
-                    { type: "FOMC Meeting", impact: 2.5, emoji: "🏦" },
-                    { type: "CPI Release", impact: 1.8, emoji: "📊" },
-                    { type: "Non-Farm Payrolls", impact: 1.5, emoji: "👔" },
-                    { type: "Fed Speech", impact: 0.8, emoji: "🎤" },
+                    { type: "FOMC Meeting", impact: 2.5, emoji: "🇺🇸🏦" },
+                    { type: "US CPI", impact: 1.8, emoji: "🇺🇸📊" },
+                    { type: "Non-Farm Payrolls", impact: 1.5, emoji: "🇺🇸👔" },
+                    { type: "EZB Zinsentscheidung", impact: 1.2, emoji: "🇪🇺🏦" },
+                    { type: "BoJ Zinsentscheidung", impact: 1.0, emoji: "🇯🇵🏦" },
+                    { type: "China BIP", impact: 0.8, emoji: "🇨🇳🏛" },
+                    { type: "BoE Zinsentscheidung", impact: 0.8, emoji: "🇬🇧🏦" },
+                    { type: "Fed Speech", impact: 0.8, emoji: "🇺🇸🎤" },
+                    { type: "China PMI", impact: 0.6, emoji: "🇨🇳🏭" },
+                    { type: "Eurozone VPI", impact: 0.6, emoji: "🇪🇺📊" },
+                    { type: "UK / Japan VPI", impact: 0.5, emoji: "📊" },
+                    { type: "Ifo Geschäftsklima", impact: 0.4, emoji: "🇩🇪📉" },
+                    { type: "ZEW Erwartungen", impact: 0.3, emoji: "🇩🇪📉" },
                   ].map((item) => (
                     <div key={item.type} className="flex items-center justify-between text-sm">
                       <span style={{ color: "#8B8FA8" }}>{item.emoji} {item.type}</span>
