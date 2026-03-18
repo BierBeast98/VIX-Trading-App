@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { Plus, Pencil, Trash2, Download, Bell, BellOff, TrendingUp, Loader2, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -214,29 +214,45 @@ export default function TradesPage() {
     a.click();
   };
 
-  const closedTrades = trades.filter((t) => t.exitDate);
-  const openTrades = trades.filter((t) => !t.exitDate);
-  const avgReturn = closedTrades.length
-    ? closedTrades.reduce((sum, t) => sum + (t.returnPct ?? 0), 0) / closedTrades.length
-    : 0;
-  const winRate = closedTrades.length
-    ? closedTrades.filter((t) => (t.returnPct ?? 0) > 0).length / closedTrades.length
-    : 0;
-  const totalInvested = openTrades.reduce((sum, t) => {
-    return sum + (t.entryPrice && t.quantity ? t.entryPrice * t.quantity : 0);
-  }, 0);
-  const avgHoldDays = closedTrades.length
-    ? closedTrades.reduce((sum, t) => sum + Math.max(t.holdDays ?? 1, 1), 0) / closedTrades.length
-    : 0;
-  const annualizedReturn = closedTrades.length && avgHoldDays > 0
-    ? (Math.pow(1 + avgReturn / 100, 365 / avgHoldDays) - 1) * 100
-    : 0;
-  const totalPnL = closedTrades.reduce((sum, t) => {
-    if (t.entryPrice && t.exitPrice && t.quantity) {
-      return sum + (t.exitPrice - t.entryPrice) * t.quantity;
-    }
-    return sum;
-  }, 0);
+  // Summary statistics — memoized so they only recompute when trades array changes
+  const { closedTrades, openTrades, avgReturn, winRate, totalInvested, avgHoldDays, annualizedReturn, totalPnL } =
+    useMemo(() => {
+      const closed = trades.filter((t) => t.exitDate);
+      const open = trades.filter((t) => !t.exitDate);
+      const avg = closed.length
+        ? closed.reduce((sum, t) => sum + (t.returnPct ?? 0), 0) / closed.length
+        : 0;
+      const wins = closed.length
+        ? closed.filter((t) => (t.returnPct ?? 0) > 0).length / closed.length
+        : 0;
+      const invested = open.reduce(
+        (sum, t) => sum + (t.entryPrice && t.quantity ? t.entryPrice * t.quantity : 0),
+        0
+      );
+      const holdDays = closed.length
+        ? closed.reduce((sum, t) => sum + Math.max(t.holdDays ?? 1, 1), 0) / closed.length
+        : 0;
+      const annualized =
+        closed.length && holdDays > 0
+          ? (Math.pow(1 + avg / 100, 365 / holdDays) - 1) * 100
+          : 0;
+      const pnl = closed.reduce((sum, t) => {
+        if (t.entryPrice && t.exitPrice && t.quantity) {
+          return sum + (t.exitPrice - t.entryPrice) * t.quantity;
+        }
+        return sum;
+      }, 0);
+      return {
+        closedTrades: closed,
+        openTrades: open,
+        avgReturn: avg,
+        winRate: wins,
+        totalInvested: invested,
+        avgHoldDays: holdDays,
+        annualizedReturn: annualized,
+        totalPnL: pnl,
+      };
+    }, [trades]);
 
   // Live preview calculations in form
   const formInvestment =

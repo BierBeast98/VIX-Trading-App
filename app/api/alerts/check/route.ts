@@ -102,49 +102,51 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Trailing Stop — check each open position's P&L vs. floor
+    // Trailing Stop — check all open positions in parallel
     if (positions.length > 0 && alertSettings.trailingStopConfig.enabled) {
-      for (let i = 0; i < positions.length; i++) {
-        const p = positions[i];
-        let bid: number | null = null;
-        try {
-          const cached = await prisma.vixCache.findUnique({
-            where: { id: `vontobel_${p.certificateId}` },
-          });
-          if (cached) {
-            const data = cached.data as { bid?: number | null };
-            bid = data.bid ?? null;
-          }
-        } catch { /* noop */ }
+      const tsResults = await Promise.all(
+        positions.map(async (p) => {
+          let bid: number | null = null;
+          try {
+            const cached = await prisma.vixCache.findUnique({
+              where: { id: `vontobel_${p.certificateId}` },
+            });
+            if (cached) {
+              const data = cached.data as { bid?: number | null };
+              bid = data.bid ?? null;
+            }
+          } catch { /* noop */ }
 
-        if (bid == null || p.entryPrice <= 0) continue;
+          if (bid == null || p.entryPrice <= 0) return null;
 
-        const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
-
-        const tsResult = checkTrailingStop(
-          {
-            positionId: p.id,
-            certificateId: p.certificateId,
-            currentPnlPct,
-            currentFloor: p.trailingStopFloor,
-            peakPnlPct: p.peakPnlPct,
-            entryPrice: p.entryPrice,
-            currentBid: bid,
-          },
-          alertSettings
-        );
-
-        if (tsResult) {
-          triggered.push(tsResult.alert);
-          await prisma.position.update({
-            where: { id: p.id },
-            data: {
-              trailingStopFloor: tsResult.newFloor,
-              peakPnlPct: tsResult.newPeakPnlPct,
+          const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
+          const tsResult = checkTrailingStop(
+            {
+              positionId: p.id,
+              certificateId: p.certificateId,
+              currentPnlPct,
+              currentFloor: p.trailingStopFloor,
+              peakPnlPct: p.peakPnlPct,
+              entryPrice: p.entryPrice,
+              currentBid: bid,
             },
-          });
-        }
-      }
+            alertSettings
+          );
+          return tsResult ? { alert: tsResult.alert, positionId: p.id, newFloor: tsResult.newFloor, newPeakPnlPct: tsResult.newPeakPnlPct } : null;
+        })
+      );
+
+      // Apply position updates in parallel for all triggered trailing stops
+      const updates = tsResults.filter((r): r is NonNullable<typeof r> => r !== null);
+      triggered.push(...updates.map((r) => r.alert));
+      await Promise.all(
+        updates.map((r) =>
+          prisma.position.update({
+            where: { id: r.positionId },
+            data: { trailingStopFloor: r.newFloor, peakPnlPct: r.newPeakPnlPct },
+          })
+        )
+      );
     }
 
     // Economic event alerts (2h warning)

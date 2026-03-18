@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { memGet, memSet } from "@/lib/server-cache";
+
+const CACHE_TTL = 60_000; // 1 minute — product data changes rarely
+const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
 
 const HEADERS = {
   "User-Agent":
@@ -17,6 +21,11 @@ export async function GET(req: NextRequest) {
   if (!isin || !/^[A-Z0-9]{12}$/.test(isin)) {
     return NextResponse.json({ error: "Invalid ISIN" }, { status: 400 });
   }
+
+  // In-memory cache — avoids HTML scrape + JSON parse on every call
+  const cacheKey = `product_${isin}`;
+  const hit = memGet<object>(cacheKey);
+  if (hit) return NextResponse.json(hit, { headers: CC });
 
   try {
     // Fetch product page + chart data in parallel
@@ -79,15 +88,9 @@ export async function GET(req: NextRequest) {
       } catch { /* ignore chart parse errors */ }
     }
 
-    return NextResponse.json({
-      isin,
-      strikePrice,
-      barrierLevel,
-      leverage,
-      ratio,
-      bid,
-      underlying,
-    });
+    const data = { isin, strikePrice, barrierLevel, leverage, ratio, bid, underlying };
+    memSet(cacheKey, data, CACHE_TTL);
+    return NextResponse.json(data, { headers: CC });
   } catch (err) {
     console.error("[vontobel/product]", err);
     return NextResponse.json({ error: "Fetch failed" }, { status: 502 });

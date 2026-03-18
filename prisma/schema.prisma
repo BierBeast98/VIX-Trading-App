@@ -45,6 +45,8 @@ model Position {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   trades         Trade[]
+
+  @@index([status])
 }
 
 model Trade {
@@ -70,6 +72,9 @@ model Trade {
   notes          String    @default("")
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  @@index([entryDate])
+  @@index([exitDate])
 }
 
 model AlertLog {
@@ -79,6 +84,9 @@ model AlertLog {
   vixLevel     Float?
   sentAt       DateTime @default(now())
   acknowledged Boolean  @default(false)
+
+  @@index([sentAt])
+  @@index([alertType])
 }
 
 model VixCache {

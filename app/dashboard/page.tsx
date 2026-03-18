@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { TrendingUp, TrendingDown, RefreshCw, Activity, Bell as BellIcon } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -133,45 +133,25 @@ export default function DashboardPage() {
   const alerts = alertsData?.alerts ?? [];
   const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
 
-  // Dependent: Vontobel prices per position
+  // Batch: Vontobel prices + intraday for all positions in a single request
   const positionIds = positions.map((p) => p.certificateId);
-  const { data: positionPrices = {} } = useSWR<Record<string, VontobelPrice>>(
-    positionIds.length > 0 ? ["vontobel-prices", ...positionIds] : null,
+  const { data: batchData } = useSWR<{
+    prices: Record<string, VontobelPrice>;
+    intraday: Record<string, IntradayPoint[]>;
+  }>(
+    positionIds.length > 0 ? ["vontobel-batch", ...positionIds] : null,
     async () => {
-      const results = await Promise.all(
-        positions.map(async (pos) => {
-          try {
-            const res = await fetch(`/api/vontobel/price?isin=${pos.certificateId}`);
-            if (res.ok) return [pos.certificateId, await res.json()] as const;
-          } catch { /* noop */ }
-          return [pos.certificateId, { bid: null, underlying: null, timestamp: null }] as const;
-        })
-      );
-      return Object.fromEntries(results);
+      const isins = positionIds.join(",");
+      try {
+        const res = await fetch(`/api/vontobel/batch?isins=${isins}`);
+        if (res.ok) return res.json();
+      } catch { /* noop */ }
+      return { prices: {}, intraday: {} };
     },
     { refreshInterval: 60_000 }
   );
-
-  // Dependent: Certificate intraday charts
-  const { data: certIntraday = {} } = useSWR<Record<string, IntradayPoint[]>>(
-    positionIds.length > 0 ? ["cert-intraday", ...positionIds] : null,
-    async () => {
-      const results = await Promise.all(
-        positions.map(async (pos) => {
-          try {
-            const res = await fetch(`/api/vontobel/intraday?isin=${pos.certificateId}`);
-            if (res.ok) {
-              const json = await res.json();
-              return [pos.certificateId, json.data ?? []] as const;
-            }
-          } catch { /* noop */ }
-          return [pos.certificateId, []] as const;
-        })
-      );
-      return Object.fromEntries(results);
-    },
-    { refreshInterval: 60_000 }
-  );
+  const positionPrices = batchData?.prices ?? {};
+  const certIntraday = batchData?.intraday ?? {};
 
   const loading = !vixData && !intraday;
 
@@ -186,7 +166,7 @@ export default function DashboardPage() {
             key.startsWith("/api/settings");
         }
         if (Array.isArray(key)) {
-          return key[0] === "vontobel-prices" || key[0] === "cert-intraday";
+          return key[0] === "vontobel-batch";
         }
         return false;
       },
@@ -232,17 +212,27 @@ export default function DashboardPage() {
     );
   }
 
-  // Helper: compute position P&L for reuse
-  const getPositionPnl = (pos: Position) => {
-    const vPrice = positionPrices[pos.certificateId];
-    const bid = vPrice?.bid ?? null;
-    const trade = pos.trades[0];
-    const pnlPct = bid != null && pos.entryPrice > 0
-      ? (bid - pos.entryPrice) / pos.entryPrice * 100 : null;
-    const pnlEur = bid != null && pos.entryPrice > 0 && trade?.quantity
-      ? (bid - pos.entryPrice) * trade.quantity : null;
-    return { bid, underlying: vPrice?.underlying ?? null, pnlPct, pnlEur, trade };
-  };
+  // Precomputed P&L for all positions — avoids recalculating inside map() on every render
+  const positionPnls = useMemo(() => {
+    const result: Record<string, {
+      bid: number | null;
+      underlying: number | null;
+      pnlPct: number | null;
+      pnlEur: number | null;
+      trade: Position["trades"][0] | undefined;
+    }> = {};
+    for (const pos of positions) {
+      const vPrice = positionPrices[pos.certificateId];
+      const bid = vPrice?.bid ?? null;
+      const trade = pos.trades[0];
+      const pnlPct = bid != null && pos.entryPrice > 0
+        ? (bid - pos.entryPrice) / pos.entryPrice * 100 : null;
+      const pnlEur = bid != null && pos.entryPrice > 0 && trade?.quantity
+        ? (bid - pos.entryPrice) * trade.quantity : null;
+      result[pos.id] = { bid, underlying: vPrice?.underlying ?? null, pnlPct, pnlEur, trade };
+    }
+    return result;
+  }, [positions, positionPrices]);
 
   const futurePrice = vFuture ? vFuture.price : futures ? futures.price : null;
   const futureChangePct = vFuture
@@ -464,7 +454,7 @@ export default function DashboardPage() {
               </span>
             </div>
             {positions.map((pos) => {
-              const { bid, pnlPct, pnlEur } = getPositionPnl(pos);
+              const { bid, pnlPct, pnlEur } = positionPnls[pos.id] ?? { bid: null, pnlPct: null, pnlEur: null };
               return (
                 <div key={`mob-pos-${pos.id}`} className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -737,7 +727,7 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {positions.map((pos) => {
                   const barrierDist = vix ? Math.abs(vix.price - pos.currentBarrier) / pos.currentBarrier * 100 : null;
-                  const { bid, underlying, pnlPct, pnlEur } = getPositionPnl(pos);
+                  const { bid, underlying, pnlPct, pnlEur } = positionPnls[pos.id] ?? { bid: null, underlying: null, pnlPct: null, pnlEur: null };
                   return (
                     <div key={pos.id} className="p-3 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
                       <div className="flex items-center justify-between">
