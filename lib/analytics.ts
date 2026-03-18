@@ -78,67 +78,116 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
   };
 }
 
+export interface BacktestParams {
+  /** VIX ≤ this level triggers a long entry (Einstiegsniveau) */
+  entryThreshold: number;
+  /** Minimum P&L% required to activate the trailing stop (Mindestrendite) */
+  targetReturnPct: number;
+  /** Trailing stop step size in % — floor rises by this for each gain step (Schritte) */
+  stepPct: number;
+  /** Certificate leverage multiplier (Hebel) */
+  leverageRatio: number;
+  /** Maximum hold period in days — used as fallback if trailing stop never triggers */
+  maxHoldDays: number;
+}
+
 export interface BacktestResult {
   period: string;
   tradesSimulated: number;
   winRate: number;
   avgReturn: number;
   totalReturn: number;
-  bestEntry: number;
+  avgHoldDays: number;
   maxDrawdown: number;
+  trailingStopExits: number;
+  maxHoldExits: number;
+  avgEntryVix: number;
 }
 
 export function runBacktest(
   history: { date: string; close: number }[],
-  entryThreshold: number,
-  exitThreshold: number,
-  holdDays = 10
+  params: BacktestParams
 ): BacktestResult {
-  if (history.length < holdDays + 1) {
-    return {
-      period: "Nicht genug Daten",
-      tradesSimulated: 0,
-      winRate: 0,
-      avgReturn: 0,
-      totalReturn: 0,
-      bestEntry: 0,
-      maxDrawdown: 0,
-    };
-  }
+  const { entryThreshold, targetReturnPct, stepPct, leverageRatio, maxHoldDays } = params;
 
-  const trades: { entryVix: number; exitVix: number; return: number }[] = [];
+  const emptyResult = (period: string): BacktestResult => ({
+    period,
+    tradesSimulated: 0,
+    winRate: 0,
+    avgReturn: 0,
+    totalReturn: 0,
+    avgHoldDays: 0,
+    maxDrawdown: 0,
+    trailingStopExits: 0,
+    maxHoldExits: 0,
+    avgEntryVix: 0,
+  });
+
+  if (history.length < 2) return emptyResult("Nicht genug Daten");
+
+  const periodLabel = `${history[0].date} – ${history[history.length - 1].date}`;
+
+  const trades: {
+    entryVix: number;
+    return: number;
+    holdDays: number;
+    exitReason: "trailing_stop" | "max_hold";
+  }[] = [];
+
   let i = 0;
 
-  while (i < history.length - holdDays) {
-    const vix = history[i].close;
+  while (i < history.length - 1) {
+    const entryVix = history[i].close;
 
-    if (vix <= entryThreshold) {
-      const exitIdx = Math.min(i + holdDays, history.length - 1);
-      const exitVix = history[exitIdx].close;
-      // Knockout long VIX: profit when VIX rises
-      const ret = ((exitVix - vix) / vix) * 100;
-      trades.push({ entryVix: vix, exitVix, return: ret });
+    if (entryVix <= entryThreshold) {
+      let peakPnl = 0;
+      let floor: number | null = null;
+      let exitIdx = Math.min(i + maxHoldDays, history.length - 1);
+      let exitReason: "trailing_stop" | "max_hold" = "max_hold";
+      let exitCertPnl = 0;
+
+      for (let j = i + 1; j <= Math.min(i + maxHoldDays, history.length - 1); j++) {
+        const vixChangePct = (history[j].close - entryVix) / entryVix * 100;
+        const certPnl = vixChangePct * leverageRatio;
+
+        peakPnl = Math.max(peakPnl, certPnl);
+
+        // Trailing stop floor: activates when Mindestrendite is reached.
+        // Floor starts one step below the target and rises with each additional step.
+        if (peakPnl >= targetReturnPct && stepPct > 0) {
+          const stepsAbove = Math.floor((peakPnl - targetReturnPct) / stepPct);
+          floor = targetReturnPct - stepPct + stepsAbove * stepPct;
+        }
+
+        exitCertPnl = certPnl;
+        exitIdx = j;
+
+        if (floor !== null && certPnl < floor) {
+          exitReason = "trailing_stop";
+          break;
+        }
+      }
+
+      trades.push({
+        entryVix,
+        return: exitCertPnl,
+        holdDays: exitIdx - i,
+        exitReason,
+      });
+
       i = exitIdx + 1;
     } else {
       i++;
     }
   }
 
-  if (trades.length === 0) {
-    return {
-      period: `${history[0].date} – ${history[history.length - 1].date}`,
-      tradesSimulated: 0,
-      winRate: 0,
-      avgReturn: 0,
-      totalReturn: 0,
-      bestEntry: 0,
-      maxDrawdown: 0,
-    };
-  }
+  if (trades.length === 0) return emptyResult(periodLabel);
 
   const returns = trades.map((t) => t.return);
   const wins = returns.filter((r) => r > 0);
-  const avgEntry = trades.reduce((a, b) => a + b.entryVix, 0) / trades.length;
+  const totalHoldDays = trades.reduce((a, t) => a + t.holdDays, 0);
+  const avgEntryVix = trades.reduce((a, t) => a + t.entryVix, 0) / trades.length;
+  const trailingStopExits = trades.filter((t) => t.exitReason === "trailing_stop").length;
 
   let maxDrawdown = 0;
   let peak = 0;
@@ -151,13 +200,16 @@ export function runBacktest(
   }
 
   return {
-    period: `${history[0].date} – ${history[history.length - 1].date}`,
+    period: periodLabel,
     tradesSimulated: trades.length,
     winRate: wins.length / trades.length,
     avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
     totalReturn: returns.reduce((a, b) => a + b, 0),
-    bestEntry: avgEntry,
+    avgHoldDays: totalHoldDays / trades.length,
     maxDrawdown,
+    trailingStopExits,
+    maxHoldExits: trades.length - trailingStopExits,
+    avgEntryVix,
   };
 }
 

@@ -41,13 +41,22 @@ interface AnalyticsData {
   riskBudget: number;
 }
 
+interface Settings {
+  vixLowThreshold: number;
+  targetReturnPct: number;
+  trailingStopConfig?: { stepPct?: number };
+}
+
 export default function AnalyticsPage() {
   const { data, isLoading: loading } = useSWR<AnalyticsData>("/api/analytics");
+  const { data: settings } = useSWR<Settings>("/api/settings");
 
   // Backtesting state
   const [btThreshold, setBtThreshold] = useState("15");
-  const [btExitThreshold, setBtExitThreshold] = useState("20");
-  const [btHoldDays, setBtHoldDays] = useState("10");
+  const [btTargetReturn, setBtTargetReturn] = useState("18");
+  const [btStepPct, setBtStepPct] = useState("5");
+  const [btLeverage, setBtLeverage] = useState("10");
+  const [btMaxHold, setBtMaxHold] = useState("60");
   const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [btRunning, setBtRunning] = useState(false);
 
@@ -56,17 +65,27 @@ export default function AnalyticsPage() {
   const [psBudget, setPsBudget] = useState("");
   const [psResult, setPsResult] = useState<ReturnType<typeof suggestPositionSize> | null>(null);
 
+  // Pre-fill backtest params from saved settings
+  useEffect(() => {
+    if (settings) {
+      setBtThreshold(String(settings.vixLowThreshold ?? 15));
+      setBtTargetReturn(String(settings.targetReturnPct ?? 18));
+      setBtStepPct(String(settings.trailingStopConfig?.stepPct ?? 5));
+    }
+  }, [settings]);
+
   const runBt = async () => {
     setBtRunning(true);
     const res = await fetch(`/api/vix/historical?period=1y`);
     if (res.ok) {
       const histData = await res.json();
-      const result = runBacktest(
-        histData.vix || [],
-        parseFloat(btThreshold),
-        parseFloat(btExitThreshold),
-        parseInt(btHoldDays)
-      );
+      const result = runBacktest(histData.vix ?? [], {
+        entryThreshold: parseFloat(btThreshold),
+        targetReturnPct: parseFloat(btTargetReturn),
+        stepPct: parseFloat(btStepPct),
+        leverageRatio: parseFloat(btLeverage),
+        maxHoldDays: parseInt(btMaxHold),
+      });
       setBtResult(result);
     }
     setBtRunning(false);
@@ -155,29 +174,44 @@ export default function AnalyticsPage() {
                 <CardTitle className="text-sm font-semibold text-white">Backtesting (1 Jahr)</CardTitle>
               </CardHeader>
               <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
-                Simuliert Einstiege wenn VIX ≤ Schwelle, Ausstieg nach X Tagen
+                Einstieg wenn VIX ≤ Einstiegsniveau. Ausstieg per Trailing Stop (ab Mindestrendite,
+                Schritt = {btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.
               </p>
               <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <Input
-                    label="Einsteigs-Schwelle"
+                    label="Einstiegsniveau (VIX ≤)"
                     type="number"
                     step="0.5"
                     value={btThreshold}
                     onChange={(e) => setBtThreshold(e.target.value)}
                   />
                   <Input
-                    label="Exit-Schwelle (VIX)"
+                    label="Mindestrendite (%)"
                     type="number"
-                    step="0.5"
-                    value={btExitThreshold}
-                    onChange={(e) => setBtExitThreshold(e.target.value)}
+                    step="1"
+                    value={btTargetReturn}
+                    onChange={(e) => setBtTargetReturn(e.target.value)}
                   />
                   <Input
-                    label="Haltetage (max)"
+                    label="Trailing Stop Schritt (%)"
                     type="number"
-                    value={btHoldDays}
-                    onChange={(e) => setBtHoldDays(e.target.value)}
+                    step="1"
+                    value={btStepPct}
+                    onChange={(e) => setBtStepPct(e.target.value)}
+                  />
+                  <Input
+                    label="Hebel"
+                    type="number"
+                    step="1"
+                    value={btLeverage}
+                    onChange={(e) => setBtLeverage(e.target.value)}
+                  />
+                  <Input
+                    label="Max. Haltetage"
+                    type="number"
+                    value={btMaxHold}
+                    onChange={(e) => setBtMaxHold(e.target.value)}
                   />
                 </div>
                 <Button variant="primary" size="sm" onClick={runBt} loading={btRunning}>
@@ -185,40 +219,71 @@ export default function AnalyticsPage() {
                 </Button>
 
                 {btResult && (
-                  <div className="rounded-xl p-4 space-y-2 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="rounded-xl p-4 space-y-3 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
                     <div className="text-xs font-medium" style={{ color: "#B8E15A" }}>
-                      Ergebnis: {btResult.period}
+                      {btResult.period}
                     </div>
+
+                    {/* Trades count — prominent */}
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-white">{btResult.tradesSimulated}</span>
+                      <span className="text-sm" style={{ color: "#8B8FA8" }}>Simulierte Trades</span>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       <div>
-                        <span style={{ color: "#8B8FA8" }}>Simulierte Trades: </span>
-                        <span className="text-white font-medium">{btResult.tradesSimulated}</span>
-                      </div>
-                      <div>
                         <span style={{ color: "#8B8FA8" }}>Win Rate: </span>
-                        <span style={{ color: btResult.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" }}>
+                        <span style={{ color: btResult.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" }} className="font-medium">
                           {(btResult.winRate * 100).toFixed(0)}%
                         </span>
                       </div>
                       <div>
                         <span style={{ color: "#8B8FA8" }}>Ø Rendite: </span>
-                        <span style={{ color: btResult.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                          {btResult.avgReturn.toFixed(1)}%
+                        <span style={{ color: btResult.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }} className="font-medium">
+                          {btResult.avgReturn >= 0 ? "+" : ""}{btResult.avgReturn.toFixed(1)}%
                         </span>
                       </div>
                       <div>
                         <span style={{ color: "#8B8FA8" }}>Gesamtrendite: </span>
-                        <span style={{ color: btResult.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                          {btResult.totalReturn.toFixed(1)}%
+                        <span style={{ color: btResult.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" }} className="font-medium">
+                          {btResult.totalReturn >= 0 ? "+" : ""}{btResult.totalReturn.toFixed(1)}%
                         </span>
                       </div>
                       <div>
-                        <span style={{ color: "#8B8FA8" }}>Max Drawdown: </span>
-                        <span style={{ color: "#FF4D4D" }}>-{btResult.maxDrawdown.toFixed(1)}%</span>
+                        <span style={{ color: "#8B8FA8" }}>Ø Haltetage: </span>
+                        <span className="text-white font-medium">{btResult.avgHoldDays.toFixed(1)}d</span>
                       </div>
                       <div>
-                        <span style={{ color: "#8B8FA8" }}>Bester Einstieg Ø: </span>
-                        <span className="text-white">{btResult.bestEntry.toFixed(2)}</span>
+                        <span style={{ color: "#8B8FA8" }}>Max Drawdown: </span>
+                        <span style={{ color: "#FF4D4D" }} className="font-medium">
+                          -{btResult.maxDrawdown.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div>
+                        <span style={{ color: "#8B8FA8" }}>Ø Einstieg VIX: </span>
+                        <span className="text-white font-medium">{btResult.avgEntryVix.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    {/* Exit reason breakdown */}
+                    <div className="pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
+                      <div className="text-xs mb-1.5" style={{ color: "#8B8FA8" }}>Ausstiegsgründe</div>
+                      <div className="flex gap-4 text-sm">
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-2 w-2 rounded-full" style={{ background: "#B8E15A" }} />
+                          <span style={{ color: "#8B8FA8" }}>Trailing Stop: </span>
+                          <span className="text-white font-medium">{btResult.trailingStopExits}</span>
+                          {btResult.tradesSimulated > 0 && (
+                            <span style={{ color: "#4A4A5A" }}>
+                              ({((btResult.trailingStopExits / btResult.tradesSimulated) * 100).toFixed(0)}%)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-2 w-2 rounded-full" style={{ background: "#8B8FA8" }} />
+                          <span style={{ color: "#8B8FA8" }}>Max-Hold: </span>
+                          <span className="text-white font-medium">{btResult.maxHoldExits}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
