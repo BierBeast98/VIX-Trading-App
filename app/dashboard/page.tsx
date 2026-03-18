@@ -156,6 +156,29 @@ export default function DashboardPage() {
 
   const loading = !vixData && !intraday;
 
+  // Precomputed P&L for all positions — avoids recalculating inside map() on every render
+  // Must be declared before any early return to satisfy React's Rules of Hooks
+  const positionPnls = useMemo(() => {
+    const result: Record<string, {
+      bid: number | null;
+      underlying: number | null;
+      pnlPct: number | null;
+      pnlEur: number | null;
+      trade: Position["trades"][0] | undefined;
+    }> = {};
+    for (const pos of positions) {
+      const vPrice = positionPrices[pos.certificateId];
+      const bid = vPrice?.bid ?? null;
+      const trade = pos.trades[0];
+      const pnlPct = bid != null && pos.entryPrice > 0
+        ? (bid - pos.entryPrice) / pos.entryPrice * 100 : null;
+      const pnlEur = bid != null && pos.entryPrice > 0 && trade?.quantity
+        ? (bid - pos.entryPrice) * trade.quantity : null;
+      result[pos.id] = { bid, underlying: vPrice?.underlying ?? null, pnlPct, pnlEur, trade };
+    }
+    return result;
+  }, [positions, positionPrices]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await globalMutate(
@@ -212,28 +235,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  // Precomputed P&L for all positions — avoids recalculating inside map() on every render
-  const positionPnls = useMemo(() => {
-    const result: Record<string, {
-      bid: number | null;
-      underlying: number | null;
-      pnlPct: number | null;
-      pnlEur: number | null;
-      trade: Position["trades"][0] | undefined;
-    }> = {};
-    for (const pos of positions) {
-      const vPrice = positionPrices[pos.certificateId];
-      const bid = vPrice?.bid ?? null;
-      const trade = pos.trades[0];
-      const pnlPct = bid != null && pos.entryPrice > 0
-        ? (bid - pos.entryPrice) / pos.entryPrice * 100 : null;
-      const pnlEur = bid != null && pos.entryPrice > 0 && trade?.quantity
-        ? (bid - pos.entryPrice) * trade.quantity : null;
-      result[pos.id] = { bid, underlying: vPrice?.underlying ?? null, pnlPct, pnlEur, trade };
-    }
-    return result;
-  }, [positions, positionPrices]);
 
   const futurePrice = vFuture ? vFuture.price : futures ? futures.price : null;
   const futureChangePct = vFuture
