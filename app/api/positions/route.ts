@@ -16,8 +16,6 @@ const CreatePositionSchema = z.object({
 
 export async function GET() {
   try {
-    const allPositions = await prisma.position.findMany({ orderBy: { createdAt: "desc" } });
-    console.log("[positions GET] all positions:", JSON.stringify(allPositions.map(p => ({ id: p.id, status: p.status, cert: p.certificateId }))));
     const positions = await prisma.position.findMany({
       where: { status: "open" },
       orderBy: { createdAt: "desc" },
@@ -29,7 +27,9 @@ export async function GET() {
         },
       },
     });
-    return NextResponse.json(positions);
+    return NextResponse.json(positions, {
+      headers: { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" },
+    });
   } catch (err) {
     console.error("[positions GET]", err);
     return NextResponse.json([]);

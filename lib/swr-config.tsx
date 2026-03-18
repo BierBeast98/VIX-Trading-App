@@ -13,11 +13,11 @@ export function SWRProvider({ children }: { children: React.ReactNode }) {
     <SWRConfig
       value={{
         fetcher,
-        revalidateOnFocus: true,
-        revalidateOnReconnect: true,
-        dedupingInterval: 5000,
+        revalidateOnFocus: false,      // kein Refetch beim App-Wechsel (mobil)
+        revalidateOnReconnect: false,  // kein Refetch bei Netz-Reconnect
+        dedupingInterval: 10_000,      // gleiche URL max 1x pro 10s fetchen
         errorRetryCount: 2,
-        keepPreviousData: true,
+        keepPreviousData: true,        // alte Daten zeigen während Reload
       }}
     >
       {children}

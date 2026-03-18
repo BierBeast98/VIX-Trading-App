@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { getVixSpot, getVixFutures, getEurUsd, getVontobelFuturesQuote, getVixHistory } from "@/lib/yahoo-finance";
 import { prisma } from "@/lib/prisma";
 import { calcZScore } from "@/lib/utils";
+import { memGet, memSet } from "@/lib/server-cache";
+
+const MEM_TTL = 30_000;
+const CC = { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" };
 
 async function getSettings() {
   try {
@@ -15,15 +19,20 @@ async function getSettings() {
 
 export async function GET() {
   try {
+    // 1. In-memory cache — fastest, no network round-trip
+    const hit = memGet<Record<string, unknown>>("vix_spot");
+    if (hit) return NextResponse.json(hit, { headers: CC });
+
     const { vontobelIsin, rollingWindowDays } = await getSettings();
 
-    // Try cache — but skip if rollingWindowDays changed
+    // 2. DB cache — skip if rollingWindowDays changed
     try {
       const cached = await prisma.vixCache.findUnique({ where: { id: "spot" } });
       if (cached && Date.now() - cached.updatedAt.getTime() < 60_000) {
         const cachedData = cached.data as Record<string, unknown>;
         if (cachedData.rollingWindowDays === rollingWindowDays) {
-          return NextResponse.json(cachedData);
+          memSet("vix_spot", cachedData, MEM_TTL);
+          return NextResponse.json(cachedData, { headers: CC });
         }
       }
     } catch { /* DB not yet configured — continue to live fetch */ }
@@ -81,16 +90,17 @@ export async function GET() {
       eurUsd,
     };
 
-    // Try to persist cache (DB optional)
-    try {
-      await prisma.vixCache.upsert({
-        where: { id: "spot" },
-        update: { data: data as any },
-        create: { id: "spot", data: data as any },
-      });
-    } catch { /* DB not yet configured */ }
+    // Store in-memory (instant for next hit within same instance)
+    memSet("vix_spot", data, MEM_TTL);
 
-    return NextResponse.json(data);
+    // Persist to DB async — don't block the response
+    prisma.vixCache.upsert({
+      where: { id: "spot" },
+      update: { data: data as any },
+      create: { id: "spot", data: data as any },
+    }).catch(() => {});
+
+    return NextResponse.json(data, { headers: CC });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

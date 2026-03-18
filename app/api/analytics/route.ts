@@ -46,11 +46,10 @@ export async function GET() {
       }))
       .sort((a, b) => a.range.localeCompare(b.range));
 
-    return NextResponse.json({
-      metrics,
-      entryAnalysis,
-      riskBudget: settings?.riskBudget ?? 10000,
-    });
+    return NextResponse.json(
+      { metrics, entryAnalysis, riskBudget: settings?.riskBudget ?? 10000 },
+      { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=300" } }
+    );
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

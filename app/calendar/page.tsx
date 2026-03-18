@@ -42,18 +42,33 @@ const impactColors = {
 const typeEmoji: Record<string, string> = {
   fed_meeting: "🏦",
   fed_speech: "🎤",
+  central_bank: "🏦",
   cpi: "📊",
   nfp: "👔",
   consumer_confidence: "📈",
+  pmi: "🏭",
   gdp: "🏛",
   other: "📅",
 };
+
+const countryFlag: Record<string, string> = {
+  US: "🇺🇸",
+  EU: "🇪🇺",
+  DE: "🇩🇪",
+  GB: "🇬🇧",
+  JP: "🇯🇵",
+  CA: "🇨🇦",
+  CN: "🇨🇳",
+};
+
+const COUNTRIES = ["Alle", "US", "EU", "DE", "GB", "JP", "CA", "CN"];
 
 export default function CalendarPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [countryFilter, setCountryFilter] = useState("Alle");
 
   const { data: events = [] } = useSWR<EconomicEvent[]>(
     `/api/calendar?type=month&year=${year}&month=${month}`
@@ -105,8 +120,11 @@ export default function CalendarPage() {
   ];
   while (cells.length % 7 !== 0) cells.push(null);
 
+  const filteredEvents = countryFilter === "Alle" ? events : events.filter(e => e.country === countryFilter);
+  const filteredUpcoming = countryFilter === "Alle" ? upcomingEvents : upcomingEvents.filter(e => e.country === countryFilter);
+
   const eventsByDate = new Map<string, EconomicEvent[]>();
-  for (const e of events) {
+  for (const e of filteredEvents) {
     if (!eventsByDate.has(e.date)) eventsByDate.set(e.date, []);
     eventsByDate.get(e.date)!.push(e);
   }
@@ -125,7 +143,26 @@ export default function CalendarPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+          {/* Country filter */}
+      <div className="flex flex-wrap gap-2">
+        {COUNTRIES.map((c) => (
+          <button
+            key={c}
+            onClick={() => setCountryFilter(c)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+            style={{
+              background: countryFilter === c ? "#B8E15A22" : "#141418",
+              border: `1px solid ${countryFilter === c ? "#B8E15A" : "#1E1E28"}`,
+              color: countryFilter === c ? "#B8E15A" : "#8B8FA8",
+            }}
+          >
+            {c !== "Alle" && <span>{countryFlag[c]}</span>}
+            {c}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
             {/* Calendar */}
             <div className="lg:col-span-2">
               <Card>
@@ -216,7 +253,8 @@ export default function CalendarPage() {
                           >
                             <span className="text-lg">{typeEmoji[ev.type] ?? "📅"}</span>
                             <div className="flex-1">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-base">{countryFlag[ev.country] ?? ""}</span>
                                 <span className="text-sm font-medium text-white">{ev.title}</span>
                                 {ev.time && <span className="text-xs" style={{ color: "#8B8FA8" }}>{ev.time} Uhr</span>}
                               </div>
@@ -244,18 +282,21 @@ export default function CalendarPage() {
                 <CardHeader>
                   <CardTitle className="text-sm font-semibold text-white">Nächste 30 Tage</CardTitle>
                 </CardHeader>
-                {upcomingEvents.length === 0 ? (
+                {filteredUpcoming.length === 0 ? (
                   <p className="text-sm py-2" style={{ color: "#8B8FA8" }}>Keine Events geplant</p>
                 ) : (
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                    {upcomingEvents.map((ev) => (
+                    {filteredUpcoming.map((ev) => (
                       <div
                         key={ev.id}
                         className="p-2.5 rounded-xl"
                         style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}
                       >
-                        <div className="flex items-center justify-between mb-0.5">
-                          <span className="text-xs font-medium text-white line-clamp-1">{ev.title}</span>
+                        <div className="flex items-center justify-between mb-0.5 gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span>{countryFlag[ev.country] ?? ""}</span>
+                            <span className="text-xs font-medium text-white line-clamp-1">{ev.title}</span>
+                          </div>
                           <Badge variant={ev.impact === "high" ? "danger" : ev.impact === "medium" ? "warning" : "success"}>
                             {ev.impact === "high" ? "Hoch" : ev.impact === "medium" ? "Mittel" : "Niedrig"}
                           </Badge>

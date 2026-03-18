@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { memGet, memSet } from "@/lib/server-cache";
 
 const CACHE_TTL = 60_000; // 1 minute
+const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
 
 export async function GET(req: NextRequest) {
   const isin = req.nextUrl.searchParams.get("isin");
@@ -11,11 +13,16 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = `vontobel_${isin}`;
 
-  // Try cache first
+  // 1. In-memory cache
+  const hit = memGet<object>(cacheKey);
+  if (hit) return NextResponse.json(hit, { headers: CC });
+
+  // 2. DB cache
   try {
     const cached = await prisma.vixCache.findUnique({ where: { id: cacheKey } });
     if (cached && Date.now() - cached.updatedAt.getTime() < CACHE_TTL) {
-      return NextResponse.json(cached.data);
+      memSet(cacheKey, cached.data as object, CACHE_TTL);
+      return NextResponse.json(cached.data, { headers: CC });
     }
   } catch { /* DB optional */ }
 
@@ -52,16 +59,16 @@ export async function GET(req: NextRequest) {
       timestamp: latestProduct?.timestamp ?? null,
     };
 
-    // Cache result
-    try {
-      await prisma.vixCache.upsert({
-        where: { id: cacheKey },
-        update: { data: data as any },
-        create: { id: cacheKey, data: data as any },
-      });
-    } catch { /* DB optional */ }
+    memSet(cacheKey, data, CACHE_TTL);
 
-    return NextResponse.json(data);
+    // Persist to DB async
+    prisma.vixCache.upsert({
+      where: { id: cacheKey },
+      update: { data: data as any },
+      create: { id: cacheKey, data: data as any },
+    }).catch(() => {});
+
+    return NextResponse.json(data, { headers: CC });
   } catch (err) {
     console.error("[vontobel/price]", err);
     return NextResponse.json({ error: "Fetch failed" }, { status: 502 });
