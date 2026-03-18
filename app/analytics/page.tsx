@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatPct, formatNumber } from "@/lib/utils";
 import { runBacktest, suggestPositionSize } from "@/lib/analytics";
+import { BacktestTradeChart } from "@/components/charts/BacktestTradeChart";
 
 interface Metrics {
   totalTrades: number;
@@ -59,6 +60,7 @@ export default function AnalyticsPage() {
   const [btMaxHold, setBtMaxHold] = useState("60");
   const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [btRunning, setBtRunning] = useState(false);
+  const [btHistory, setBtHistory] = useState<{ date: string; close: number }[]>([]);
 
   // Position sizing state
   const [psVix, setPsVix] = useState("15");
@@ -79,6 +81,7 @@ export default function AnalyticsPage() {
     const res = await fetch(`/api/vix/historical?period=1y`);
     if (res.ok) {
       const histData = await res.json();
+      setBtHistory(histData.vix ?? []);
       const result = runBacktest(histData.vix ?? [], {
         entryThreshold: parseFloat(btThreshold),
         targetReturnPct: parseFloat(btTargetReturn),
@@ -286,6 +289,16 @@ export default function AnalyticsPage() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {/* Trade chart — shown below result when trades exist */}
+                {btResult && btResult.trades.length > 0 && btHistory.length > 0 && (
+                  <div className="mt-4">
+                    <p className="text-xs mb-2" style={{ color: "#8B8FA8" }}>
+                      Simulierte Trades — Einstieg &amp; Ausstieg
+                    </p>
+                    <BacktestTradeChart history={btHistory} trades={btResult.trades} />
                   </div>
                 )}
               </div>

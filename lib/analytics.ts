@@ -102,6 +102,17 @@ export interface BacktestResult {
   trailingStopExits: number;
   maxHoldExits: number;
   avgEntryVix: number;
+  trades: BacktestTrade[];
+}
+
+export interface BacktestTrade {
+  entryDate: string;
+  exitDate: string;
+  entryVix: number;
+  exitVix: number;
+  returnPct: number;
+  exitReason: "trailing_stop" | "max_hold";
+  holdDays: number;
 }
 
 export function runBacktest(
@@ -121,6 +132,7 @@ export function runBacktest(
     trailingStopExits: 0,
     maxHoldExits: 0,
     avgEntryVix: 0,
+    trades: [],
   });
 
   if (history.length < 2) return emptyResult("Nicht genug Daten");
@@ -128,7 +140,10 @@ export function runBacktest(
   const periodLabel = `${history[0].date} – ${history[history.length - 1].date}`;
 
   const trades: {
+    entryDate: string;
+    exitDate: string;
     entryVix: number;
+    exitVix: number;
     return: number;
     holdDays: number;
     exitReason: "trailing_stop" | "max_hold";
@@ -169,7 +184,10 @@ export function runBacktest(
       }
 
       trades.push({
+        entryDate: history[i].date,
+        exitDate: history[exitIdx].date,
         entryVix,
+        exitVix: history[exitIdx].close,
         return: exitCertPnl,
         holdDays: exitIdx - i,
         exitReason,
@@ -210,6 +228,15 @@ export function runBacktest(
     trailingStopExits,
     maxHoldExits: trades.length - trailingStopExits,
     avgEntryVix,
+    trades: trades.map((t) => ({
+      entryDate: t.entryDate,
+      exitDate: t.exitDate,
+      entryVix: t.entryVix,
+      exitVix: t.exitVix,
+      returnPct: t.return,
+      exitReason: t.exitReason,
+      holdDays: t.holdDays,
+    })),
   };
 }
 
