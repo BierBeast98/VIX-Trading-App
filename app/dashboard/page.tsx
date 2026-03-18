@@ -10,6 +10,7 @@ import { VixHistoryChart } from "@/components/charts/VixHistoryChart";
 import { VixIntradayChart } from "@/components/charts/VixIntradayChart";
 import { CertificateIntradayChart } from "@/components/charts/CertificateIntradayChart";
 import { formatNumber, formatPct, formatDateTime } from "@/lib/utils";
+import { getRefreshInterval } from "@/lib/trading-hours";
 
 interface VixData {
   spot: {
@@ -120,15 +121,15 @@ export default function DashboardPage() {
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
-  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: 60_000 });
+  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
   const { data: history } = useSWR<HistoricalData>(
     period !== "1d" ? `/api/vix/historical?period=${period}` : null
   );
   const { data: intraday } = useSWR<IntradayData>(
     "/api/vix/historical?type=intraday",
-    { refreshInterval: 60_000 }
+    { refreshInterval: getRefreshInterval() }
   );
-  const { data: positions = [] } = useSWR<Position[]>("/api/positions", { refreshInterval: 60_000 });
+  const { data: positions = [] } = useSWR<Position[]>("/api/positions", { refreshInterval: getRefreshInterval() });
   const { data: alertsData } = useSWR<{ alerts: AlertLog[] }>("/api/alerts?limit=10");
   const alerts = alertsData?.alerts ?? [];
   const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
@@ -148,7 +149,7 @@ export default function DashboardPage() {
       } catch { /* noop */ }
       return { prices: {}, intraday: {} };
     },
-    { refreshInterval: 60_000 }
+    { refreshInterval: getRefreshInterval() }
   );
   const positionPrices = batchData?.prices ?? {};
   const certIntraday = batchData?.intraday ?? {};

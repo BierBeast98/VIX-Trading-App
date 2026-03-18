@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { memGet, memSet } from "@/lib/server-cache";
 
-const CACHE_TTL = 60_000; // 1 minute
-const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
+const CACHE_TTL = 300_000; // 5 min — aligns with client refreshInterval
+const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
 
 export async function GET(req: NextRequest) {
   const isin = req.nextUrl.searchParams.get("isin");

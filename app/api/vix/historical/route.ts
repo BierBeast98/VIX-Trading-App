@@ -18,9 +18,9 @@ export async function GET(req: NextRequest) {
 
   try {
     if (type === "intraday") {
-      // In-memory cache for intraday (60s TTL — refreshInterval on client is also 60s)
+      // In-memory cache for intraday (5 min TTL — aligns with client refreshInterval)
       const hit = memGet<object>("intraday");
-      if (hit) return NextResponse.json(hit, { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" } });
+      if (hit) return NextResponse.json(hit, { headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" } });
 
       const isin = await getVontobelIsin();
       const [freshVix, freshFutures] = await Promise.all([
@@ -44,8 +44,8 @@ export async function GET(req: NextRequest) {
       const vix3m = mergeIntradayData(storedFutures, freshFutures);
       const result = { vix, vix3m };
 
-      memSet("intraday", result, 60_000);
-      return NextResponse.json(result, { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" } });
+      memSet("intraday", result, 300_000);
+      return NextResponse.json(result, { headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" } });
     }
 
     const days =

@@ -13,9 +13,9 @@ import { prisma } from "@/lib/prisma";
 import { getVontobelCertificateIntraday } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
 
-const PRICE_TTL = 60_000;
-const INTRADAY_TTL = 60_000;
-const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
+const PRICE_TTL = 300_000; // 5 min — aligns with client refreshInterval
+const INTRADAY_TTL = 300_000;
+const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
 const MAX_ISINS = 20;
 
 const FETCH_HEADERS = {

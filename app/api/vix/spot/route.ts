@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { calcZScore } from "@/lib/utils";
 import { memGet, memSet } from "@/lib/server-cache";
 
-const MEM_TTL = 30_000;
-const CC = { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" };
+const MEM_TTL = 300_000; // 5 min — aligns with client refreshInterval
+const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
 
 async function getSettings() {
   try {
@@ -28,7 +28,7 @@ export async function GET() {
     // 2. DB cache — skip if rollingWindowDays changed
     try {
       const cached = await prisma.vixCache.findUnique({ where: { id: "spot" } });
-      if (cached && Date.now() - cached.updatedAt.getTime() < 60_000) {
+      if (cached && Date.now() - cached.updatedAt.getTime() < MEM_TTL) {
         const cachedData = cached.data as Record<string, unknown>;
         if (cachedData.rollingWindowDays === rollingWindowDays) {
           memSet("vix_spot", cachedData, MEM_TTL);

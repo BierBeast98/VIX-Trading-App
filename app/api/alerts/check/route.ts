@@ -11,6 +11,7 @@ import {
 } from "@/lib/alert-engine";
 import { sendAlertEmail } from "@/lib/resend";
 import { getEventsWithin2Hours } from "@/lib/economic-calendar";
+import { isWithinTradingHours } from "@/lib/trading-hours";
 
 
 export async function GET(req: NextRequest) {
@@ -20,6 +21,11 @@ export async function GET(req: NextRequest) {
 
   if (!testMode && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Skip outside trading hours (07:00–22:30 CET/CEST) — VIX certificates illiquid outside window
+  if (!testMode && !isWithinTradingHours()) {
+    return NextResponse.json({ message: "Outside trading hours (07:00–22:30 CET)" });
   }
 
   try {

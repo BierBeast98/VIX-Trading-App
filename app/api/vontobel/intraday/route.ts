@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getVontobelCertificateIntraday } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
 
-const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
+const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
 
 export async function GET(req: NextRequest) {
   const isin = new URL(req.url).searchParams.get("isin");
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const data = await getVontobelCertificateIntraday(isin);
-    memSet(key, data, 60_000);
+    memSet(key, data, 300_000);
     return NextResponse.json({ data }, { headers: CC });
   } catch (err) {
     console.error("Vontobel intraday error:", err);

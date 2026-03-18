@@ -28,7 +28,7 @@ export async function GET() {
       },
     });
     return NextResponse.json(positions, {
-      headers: { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" },
+      headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" },
     });
   } catch (err) {
     console.error("[positions GET]", err);

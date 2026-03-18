@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/alerts/check",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/15 5-21 * * *"
     }
   ]
 }
