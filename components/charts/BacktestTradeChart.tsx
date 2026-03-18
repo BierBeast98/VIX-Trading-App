@@ -77,7 +77,7 @@ const TradeMarker = (props: {
   return null;
 };
 
-// Custom tooltip: only shows content at entry/exit points
+// Custom tooltip: always shows VIX + date, adds trade details at entry/exit points
 const ChartTooltip = ({
   active,
   payload,
@@ -87,7 +87,6 @@ const ChartTooltip = ({
 }) => {
   if (!active || !payload?.[0]) return null;
   const d = payload[0].payload;
-  if (!d.isEntry && !d.exitTrade) return null;
 
   let dateLabel = d.date;
   try {
@@ -107,7 +106,7 @@ const ChartTooltip = ({
       <p style={{ color: "#8B8FA8", fontSize: 12, margin: 0 }}>{dateLabel}</p>
       <p style={{ color: "#B8E15A", margin: "3px 0" }}>VIX {d.close.toFixed(2)}</p>
       {d.isEntry && (
-        <p style={{ color: "#22C55E", fontSize: 12, margin: 0 }}>● Einstieg</p>
+        <p style={{ color: "#22C55E", fontSize: 12, margin: "3px 0 0" }}>● Einstieg</p>
       )}
       {d.exitTrade && (
         <>
@@ -214,7 +213,10 @@ export function BacktestTradeChart({ history, trades }: Props) {
             width={36}
             tickFormatter={(v: number) => v.toFixed(1)}
           />
-          <Tooltip content={<ChartTooltip />} />
+          <Tooltip
+            content={<ChartTooltip />}
+            cursor={{ stroke: "#2E2E3A", strokeWidth: 1 }}
+          />
           <Line
             type="monotone"
             dataKey="close"
