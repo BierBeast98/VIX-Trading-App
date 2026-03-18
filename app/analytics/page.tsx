@@ -328,15 +328,15 @@ export default function AnalyticsPage() {
                   </div>
                 )}
 
-                {/* VIX allocation guide */}
+                {/* VIX allocation guide — Long-Spike-Strategie: mehr Budget bei niedrigem VIX */}
                 <div className="mt-4 space-y-1.5">
                   {[
-                    { range: "≤ 14", pct: "30%", color: "#22C55E" },
-                    { range: "14–16", pct: "40%", color: "#B8E15A" },
-                    { range: "16–20", pct: "50%", color: "#F59E0B" },
-                    { range: "20–25", pct: "65%", color: "#F97316" },
-                    { range: "25–30", pct: "75%", color: "#EF4444" },
-                    { range: "> 30", pct: "60%", color: "#DC2626" },
+                    { range: "≤ 14", pct: "70%", color: "#22C55E" },
+                    { range: "14–16", pct: "60%", color: "#B8E15A" },
+                    { range: "16–20", pct: "40%", color: "#F59E0B" },
+                    { range: "20–25", pct: "25%", color: "#F97316" },
+                    { range: "25–30", pct: "15%", color: "#EF4444" },
+                    { range: "> 30", pct: "5%", color: "#DC2626" },
                   ].map((row) => (
                     <div key={row.range} className="flex justify-between text-xs">
                       <span style={{ color: "#8B8FA8" }}>VIX {row.range}</span>

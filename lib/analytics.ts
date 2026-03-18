@@ -218,30 +218,30 @@ export function suggestPositionSize(
   vixLevel: number,
   targetReturn: number
 ): { allocation: number; reason: string } {
-  // Risk-adjusted allocation based on VIX level
-  // Lower VIX = smaller position (higher risk of further decline)
-  // Higher VIX = larger position (mean reversion more likely)
+  // Long-VIX-Spike-Strategie: Einstieg wenn VIX niedrig → Profit bei Spike.
+  // Niedriger VIX = idealer Einstieg = größte Allokation.
+  // Hoher VIX = Spike läuft bereits = kleines Risiko, unattraktiver Einstieg.
   let pct: number;
   let reason: string;
 
   if (vixLevel <= 14) {
-    pct = 0.3;
-    reason = "VIX sehr niedrig — konservative Positionsgröße (30%)";
+    pct = 0.7;
+    reason = "VIX sehr niedrig — idealer Einstieg, hohes Spike-Potenzial (70%)";
   } else if (vixLevel <= 16) {
-    pct = 0.4;
-    reason = "VIX niedrig — moderate Positionsgröße (40%)";
-  } else if (vixLevel <= 20) {
-    pct = 0.5;
-    reason = "VIX im normalen Bereich — Standard-Positionsgröße (50%)";
-  } else if (vixLevel <= 25) {
-    pct = 0.65;
-    reason = "VIX erhöht — größere Position möglich (65%)";
-  } else if (vixLevel <= 30) {
-    pct = 0.75;
-    reason = "VIX hoch — erhöhte Mean-Reversion-Wahrscheinlichkeit (75%)";
-  } else {
     pct = 0.6;
-    reason = "VIX sehr hoch — Vorsicht: Tail-Risk vorhanden (60%)";
+    reason = "VIX niedrig — guter Einstieg, klassische Long-Zone (60%)";
+  } else if (vixLevel <= 20) {
+    pct = 0.4;
+    reason = "VIX moderat — akzeptabler Einstieg, reduzierte Größe (40%)";
+  } else if (vixLevel <= 25) {
+    pct = 0.25;
+    reason = "VIX erhöht — Spike möglicherweise im Gang, kleiner Einstieg (25%)";
+  } else if (vixLevel <= 30) {
+    pct = 0.15;
+    reason = "VIX hoch — ungünstiger Einstiegszeitpunkt, Rückschlagsrisiko (15%)";
+  } else {
+    pct = 0.05;
+    reason = "VIX extrem hoch — Spike läuft bereits, kein neuer Long-Einstieg empfohlen (5%)";
   }
 
   return {
