@@ -458,7 +458,8 @@ export default function DashboardPage() {
             {positions.map((pos) => {
               const { bid, pnlPct, pnlEur } = positionPnls[pos.id] ?? { bid: null, pnlPct: null, pnlEur: null };
               return (
-                <div key={`mob-pos-${pos.id}`} className="space-y-2">
+                <div key={`mob-pos-${pos.id}`} className="space-y-3">
+                  {/* Title row */}
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-white">VIX {pos.direction === "long" ? "Long" : "Short"}</span>
@@ -472,33 +473,47 @@ export default function DashboardPage() {
                         {pos.direction === "long" ? "LONG" : "SHORT"}
                       </span>
                     </div>
-                    <span
-                      className="text-lg font-bold"
-                      style={{ color: (pnlPct ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" }}
-                    >
-                      {pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${formatNumber(pnlPct, 1)}%` : "—"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-xs" style={{ color: "#8B8FA8" }}>Entry </span>
-                      <span className="text-lg font-bold text-white">{formatNumber(pos.entryPrice, 2)} €</span>
-                    </div>
-                    {pnlEur != null && (
+                    {/* P&L % badge */}
+                    {pnlPct != null ? (
                       <span
-                        className="text-sm font-medium"
-                        style={{ color: pnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}
+                        className="text-lg font-bold"
+                        style={{ color: pnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}
                       >
-                        ({pnlEur >= 0 ? "+" : ""}{formatNumber(pnlEur, 0)} €)
+                        {pnlPct >= 0 ? "+" : ""}{formatNumber(pnlPct, 1)}%
                       </span>
+                    ) : (
+                      <span className="text-xs" style={{ color: "#8B8FA8" }}>Lade...</span>
                     )}
                   </div>
-                  {bid != null && (
-                    <div className="text-xs" style={{ color: "#8B8FA8" }}>
-                      Current: <span className="text-white">{formatNumber(bid, 2)} €</span>
+                  {/* Entry / Current price row */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Einstieg</span>
+                      <span className="text-base font-bold text-white">{formatNumber(pos.entryPrice, 2)} €</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktuell</span>
+                      <span className="text-base font-bold text-white">
+                        {bid != null ? `${formatNumber(bid, 2)} €` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  {/* P&L EUR row */}
+                  {pnlEur != null && (
+                    <div
+                      className="flex items-center justify-between rounded-lg px-3 py-2"
+                      style={{ background: pnlEur >= 0 ? "rgba(34,197,94,0.08)" : "rgba(255,77,77,0.08)" }}
+                    >
+                      <span className="text-xs" style={{ color: "#8B8FA8" }}>P&amp;L</span>
+                      <span
+                        className="text-sm font-semibold"
+                        style={{ color: pnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}
+                      >
+                        {pnlEur >= 0 ? "+" : ""}{formatNumber(pnlEur, 2)} €
+                      </span>
                     </div>
                   )}
-                  <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
+                  <div className="flex items-center justify-between pt-1" style={{ borderTop: "1px solid #1E1E28" }}>
                     <div className="text-xs" style={{ color: "#8B8FA8" }}>
                       Barrier: {formatNumber(pos.currentBarrier)} | Leverage: {formatNumber(pos.leverageRatio, 1)}x
                     </div>

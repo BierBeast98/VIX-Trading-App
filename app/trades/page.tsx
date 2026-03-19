@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import { getRefreshInterval } from "@/lib/trading-hours";
 import { Plus, Pencil, Trash2, Download, Bell, BellOff, TrendingUp, Loader2, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -254,6 +255,21 @@ export default function TradesPage() {
       };
     }, [trades]);
 
+  // Live prices for open positions (batch Vontobel fetch)
+  const openIsins = openTrades.map((t) => t.certificateId);
+  const { data: batchData } = useSWR<{ prices: Record<string, { bid: number | null; underlying: number | null }> }>(
+    openIsins.length > 0 ? ["vontobel-batch-trades", ...openIsins] : null,
+    async () => {
+      try {
+        const res = await fetch(`/api/vontobel/batch?isins=${openIsins.join(",")}`);
+        if (res.ok) return res.json();
+      } catch { /* noop */ }
+      return { prices: {} };
+    },
+    { refreshInterval: getRefreshInterval() }
+  );
+  const livePrices = batchData?.prices ?? {};
+
   // Live preview calculations in form
   const formInvestment =
     form.entryPrice && form.quantity
@@ -299,6 +315,12 @@ export default function TradesPage() {
             const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
             const abstand = trade.entryVix && trade.barrierLevel
               ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+            const livePrice = livePrices[trade.certificateId];
+            const bid = livePrice?.bid ?? null;
+            const pnlPct = bid != null && trade.entryPrice != null && trade.entryPrice > 0
+              ? (bid - trade.entryPrice) / trade.entryPrice * 100 : null;
+            const pnlEur = bid != null && trade.entryPrice != null && trade.quantity
+              ? (bid - trade.entryPrice) * trade.quantity : null;
             return (
               <div
                 key={`hero-${trade.id}`}
@@ -327,10 +349,28 @@ export default function TradesPage() {
                     <div className="text-lg font-bold text-white font-mono">{trade.certificateId}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-white">
-                      {investment ? `${investment.toFixed(0)} €` : "—"}
-                    </div>
-                    <span className="text-[10px]" style={{ color: "#8B8FA8" }}>Investiert</span>
+                    {pnlPct != null ? (
+                      <>
+                        <div
+                          className="text-2xl font-bold"
+                          style={{ color: pnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}
+                        >
+                          {pnlPct >= 0 ? "+" : ""}{formatNumber(pnlPct, 1)}%
+                        </div>
+                        {pnlEur != null && (
+                          <span className="text-xs" style={{ color: pnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                            {pnlEur >= 0 ? "+" : ""}{formatNumber(pnlEur, 2)} €
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-2xl font-bold text-white">
+                          {investment ? `${investment.toFixed(0)} €` : "—"}
+                        </div>
+                        <span className="text-[10px]" style={{ color: "#8B8FA8" }}>Investiert</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
@@ -341,9 +381,9 @@ export default function TradesPage() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Hebel</span>
-                    <span className="text-sm font-medium" style={{ color: "#B8E15A" }}>
-                      {trade.leverageRatio != null ? `×${formatNumber(trade.leverageRatio, 2)}` : "—"}
+                    <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktuell</span>
+                    <span className="text-sm font-medium text-white">
+                      {bid != null ? `${formatNumber(bid, 2)} €` : "—"}
                     </span>
                   </div>
                   <div>
