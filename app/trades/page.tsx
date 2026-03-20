@@ -53,10 +53,22 @@ const EMPTY_FORM = {
 
 export default function TradesPage() {
   const { data: trades = [], isLoading: loading, mutate: mutateTrades } = useSWR<Trade[]>("/api/trades");
+
+  // Live prices for open trades
+  const openIsins = useMemo(
+    () => [...new Set(trades.filter((t) => !t.exitDate).map((t) => t.certificateId))],
+    [trades]
+  );
+  const { data: batchData } = useSWR<{ prices: Record<string, { bid: number | null }> }>(
+    openIsins.length ? `/api/vontobel/batch?isins=${openIsins.join(",")}` : null,
+    { refreshInterval: 300_000 }
+  );
+  const livePrices: Record<string, { bid: number | null }> = batchData?.prices ?? {};
   const [modalOpen, setModalOpen] = useState(false);
   const [editTrade, setEditTrade] = useState<Trade | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expandedTrade, setExpandedTrade] = useState<string | null>(null);
   const [fetchingProduct, setFetchingProduct] = useState(false);
@@ -138,7 +150,12 @@ export default function TradesPage() {
   };
 
   const handleSave = async () => {
+    if (!/^[A-Z0-9]{12}$/.test(form.certificateId)) {
+      setSaveError("ISIN muss genau 12 Zeichen haben (z.B. DE000VU4MAY5)");
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     const ep = form.entryPrice ? parseFloat(form.entryPrice) : null;
     const xp = form.exitPrice ? parseFloat(form.exitPrice) : null;
     const autoReturn = ep && xp ? ((xp - ep) / ep) * 100 : null;
@@ -164,14 +181,21 @@ export default function TradesPage() {
 
     const url = editTrade ? `/api/trades/${editTrade.id}` : "/api/trades";
     const method = editTrade ? "PUT" : "POST";
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (res.ok) {
-      await mutateTrades();
-      setModalOpen(false);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        await mutateTrades();
+        setModalOpen(false);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setSaveError(err?.error ? JSON.stringify(err.error) : `Fehler ${res.status}`);
+      }
+    } catch {
+      setSaveError("Netzwerkfehler — Datenbankverbindung prüfen");
     }
     setSaving(false);
   };
@@ -362,6 +386,7 @@ export default function TradesPage() {
                             {pnlEur >= 0 ? "+" : ""}{formatNumber(pnlEur, 2)} €
                           </span>
                         )}
+                        <span className="text-[10px]" style={{ color: "#8B8FA8" }}>Unrealisiert</span>
                       </>
                     ) : (
                       <>
@@ -373,7 +398,7 @@ export default function TradesPage() {
                     )}
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-4 gap-2">
                   <div>
                     <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Einstieg</span>
                     <span className="text-sm font-medium text-white">
@@ -382,8 +407,14 @@ export default function TradesPage() {
                   </div>
                   <div>
                     <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktuell</span>
-                    <span className="text-sm font-medium text-white">
+                    <span className="text-sm font-medium" style={{ color: bid != null ? "#fff" : "#8B8FA8" }}>
                       {bid != null ? `${formatNumber(bid, 2)} €` : "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Hebel</span>
+                    <span className="text-sm font-medium" style={{ color: "#B8E15A" }}>
+                      {trade.leverageRatio != null ? `×${formatNumber(trade.leverageRatio, 2)}` : "—"}
                     </span>
                   </div>
                   <div>
@@ -488,6 +519,11 @@ export default function TradesPage() {
               ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
             const isOpen = !trade.exitDate;
             const isExpanded = expandedTrade === trade.id;
+            const liveBid = isOpen ? (livePrices[trade.certificateId]?.bid ?? null) : null;
+            const currentPnlPct = liveBid && trade.entryPrice
+              ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
+            const currentPnlEur = liveBid && trade.entryPrice && trade.quantity
+              ? (liveBid - trade.entryPrice) * trade.quantity : null;
             return (
               <div
                 key={`mob-${trade.id}`}
@@ -516,7 +552,18 @@ export default function TradesPage() {
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
                     {isOpen ? (
-                      <Badge variant="accent">Offen</Badge>
+                      currentPnlPct != null ? (
+                        <div className="text-right">
+                          <div className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                            {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 1)}%
+                          </div>
+                          {currentPnlEur != null && (
+                            <div className="text-[10px]" style={{ color: currentPnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                              {currentPnlEur >= 0 ? "+" : ""}{currentPnlEur.toFixed(0)} €
+                            </div>
+                          )}
+                        </div>
+                      ) : <Badge variant="accent">Offen</Badge>
                     ) : (
                       <span
                         className="text-sm font-bold"
@@ -585,6 +632,23 @@ export default function TradesPage() {
                         <span className="text-sm text-white">{trade.holdDays ?? "—"}</span>
                       </div>
                     </div>
+                    {isOpen && liveBid != null && (
+                      <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
+                        <div>
+                          <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktueller Kurs</span>
+                          <span className="text-sm text-white">{formatNumber(liveBid, 3)} €</span>
+                        </div>
+                        {currentPnlPct != null && (
+                          <div className="text-right">
+                            <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Unrealisiert</span>
+                            <span className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                              {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 2)}%
+                              {currentPnlEur != null && ` / ${currentPnlEur >= 0 ? "+" : ""}${currentPnlEur.toFixed(0)} €`}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {trade.returnPct != null && (
                       <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
                         <span className="text-xs" style={{ color: "#8B8FA8" }}>Rendite</span>
@@ -653,6 +717,12 @@ export default function TradesPage() {
                   const abstand = trade.entryVix && trade.barrierLevel
                     ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
                     : null;
+                  const tradeIsOpen = !trade.exitDate;
+                  const tradeLiveBid = tradeIsOpen ? (livePrices[trade.certificateId]?.bid ?? null) : null;
+                  const tradePnlPct = tradeLiveBid && trade.entryPrice
+                    ? ((tradeLiveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
+                  const tradePnlEur = tradeLiveBid && trade.entryPrice && trade.quantity
+                    ? (tradeLiveBid - trade.entryPrice) * trade.quantity : null;
                   return (
                     <tr key={trade.id} className="border-b transition-colors" style={{ borderColor: "#1E1E28", background: i % 2 === 0 ? "transparent" : "#0D0D11" }}>
                       <td className="py-3 px-2 font-mono text-xs text-white whitespace-nowrap">{trade.certificateId}</td>
@@ -704,7 +774,18 @@ export default function TradesPage() {
                         ) : "—"}
                       </td>
                       <td className="py-3 px-2 text-xs">
-                        {trade.returnPct !== null ? (
+                        {tradeIsOpen && tradePnlPct != null ? (
+                          <div>
+                            <span style={{ color: tradePnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                              {tradePnlPct >= 0 ? "+" : ""}{formatNumber(tradePnlPct, 1)}%
+                            </span>
+                            {tradePnlEur != null && (
+                              <div style={{ color: tradePnlEur >= 0 ? "#22C55E" : "#FF4D4D", fontSize: "10px" }}>
+                                {tradePnlEur >= 0 ? "+" : ""}{tradePnlEur.toFixed(0)} €
+                              </div>
+                            )}
+                          </div>
+                        ) : trade.returnPct !== null ? (
                           <span style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
                             {formatPct(trade.returnPct)}
                           </span>
@@ -759,6 +840,11 @@ export default function TradesPage() {
               )}
               {productError && (
                 <p className="text-xs mt-1" style={{ color: "#FF4D4D" }}>{productError}</p>
+              )}
+              {!productError && form.certificateId.length > 0 && form.certificateId.length < 12 && (
+                <p className="text-xs mt-1" style={{ color: "#F59E0B" }}>
+                  ISIN unvollständig ({form.certificateId.length}/12 Zeichen)
+                </p>
               )}
             </div>
             <Input
@@ -918,7 +1004,15 @@ export default function TradesPage() {
               type="number"
               step="0.001"
               value={form.exitPrice}
-              onChange={(e) => setForm({ ...form, exitPrice: e.target.value })}
+              onChange={(e) => {
+                const val = e.target.value;
+                setForm((f) => ({
+                  ...f,
+                  exitPrice: val,
+                  // Auto-set exit date to today if price is entered but date is empty
+                  exitDate: val && !f.exitDate ? new Date().toISOString().split("T")[0] : f.exitDate,
+                }));
+              }}
               placeholder="leer lassen wenn offen"
             />
             <Input
@@ -974,6 +1068,11 @@ export default function TradesPage() {
           </div>
         </div>
 
+        {saveError && (
+          <div className="mt-4 rounded-lg px-4 py-3 text-sm" style={{ background: "rgba(255,77,77,0.1)", color: "#FF4D4D", border: "1px solid rgba(255,77,77,0.2)" }}>
+            {saveError}
+          </div>
+        )}
         <div className="flex justify-end gap-3 mt-6">
           <Button variant="ghost" onClick={() => setModalOpen(false)}>Abbrechen</Button>
           <Button variant="primary" onClick={handleSave} loading={saving}>

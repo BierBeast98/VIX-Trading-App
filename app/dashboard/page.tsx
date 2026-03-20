@@ -87,6 +87,23 @@ interface Position {
   }>;
 }
 
+interface Trade {
+  id: string;
+  certificateId: string;
+  direction: "long" | "short";
+  entryDate: string;
+  exitDate: string | null;
+  entryVix: number;
+  barrierLevel: number;
+  strikePrice: number | null;
+  leverageRatio: number | null;
+  ratio: number | null;
+  entryPrice: number | null;
+  exitPrice: number | null;
+  quantity: number | null;
+  returnPct: number | null;
+}
+
 interface AlertLog {
   id: string;
   alertType: string;
@@ -130,19 +147,25 @@ export default function DashboardPage() {
     { refreshInterval: getRefreshInterval() }
   );
   const { data: positions = [] } = useSWR<Position[]>("/api/positions", { refreshInterval: getRefreshInterval() });
+  const { data: trades = [] } = useSWR<Trade[]>("/api/trades", { refreshInterval: getRefreshInterval() });
+  const openTrades = useMemo(() => trades.filter((t) => !t.exitDate), [trades]);
   const { data: alertsData } = useSWR<{ alerts: AlertLog[] }>("/api/alerts?limit=10");
   const alerts = alertsData?.alerts ?? [];
   const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
 
   // Batch: Vontobel prices + intraday for all positions in a single request
   const positionIds = positions.map((p) => p.certificateId);
+  const allBatchIsins = useMemo(() => {
+    const tradeIsins = openTrades.map((t) => t.certificateId).filter((id) => /^[A-Z0-9]{12}$/.test(id));
+    return [...new Set([...positionIds, ...tradeIsins])];
+  }, [positionIds, openTrades]);
   const { data: batchData } = useSWR<{
     prices: Record<string, VontobelPrice>;
     intraday: Record<string, IntradayPoint[]>;
   }>(
-    positionIds.length > 0 ? ["vontobel-batch", ...positionIds] : null,
+    allBatchIsins.length > 0 ? ["vontobel-batch", ...allBatchIsins] : null,
     async () => {
-      const isins = positionIds.join(",");
+      const isins = allBatchIsins.join(",");
       try {
         const res = await fetch(`/api/vontobel/batch?isins=${isins}`);
         if (res.ok) return res.json();
@@ -443,84 +466,102 @@ export default function DashboardPage() {
           );
         })}
 
-        {/* Mobile Position Card */}
-        {positions.length > 0 && (
-          <div className="rounded-2xl p-4" style={{ background: "#141418", border: "1px solid #1E1E28" }}>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-white">Offene Position</span>
-              <span
-                className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold"
-                style={{ background: "#1E1E28", color: "#8B8FA8" }}
-              >
-                {positions.length}
-              </span>
-            </div>
-            {positions.map((pos) => {
-              const { bid, pnlPct, pnlEur } = positionPnls[pos.id] ?? { bid: null, pnlPct: null, pnlEur: null };
+        {/* Mobile Position Card — uses trade data for accuracy */}
+        {openTrades.length > 0 && (
+          <div className="space-y-2.5">
+            {openTrades.map((trade) => {
+              const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
+              const abstand = trade.entryVix && trade.barrierLevel
+                ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+              const liveBid = positionPrices[trade.certificateId]?.bid ?? null;
+              const pnlPct = liveBid && trade.entryPrice
+                ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
+              const pnlEur = liveBid && trade.entryPrice && trade.quantity
+                ? (liveBid - trade.entryPrice) * trade.quantity : null;
               return (
-                <div key={`mob-pos-${pos.id}`} className="space-y-3">
-                  {/* Title row */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-white">VIX {pos.direction === "long" ? "Long" : "Short"}</span>
-                      <span
-                        className="px-1.5 py-0.5 rounded text-[10px] font-bold"
-                        style={{
-                          background: pos.direction === "long" ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 77, 77, 0.15)",
-                          color: pos.direction === "long" ? "#3B82F6" : "#FF4D4D",
-                        }}
-                      >
-                        {pos.direction === "long" ? "LONG" : "SHORT"}
-                      </span>
+                <div
+                  key={`dash-hero-${trade.id}`}
+                  className="rounded-2xl p-4 relative overflow-hidden"
+                  style={{
+                    background: trade.direction === "long"
+                      ? "linear-gradient(135deg, #141418 0%, #141a24 100%)"
+                      : "linear-gradient(135deg, #141418 0%, #1e1418 100%)",
+                    border: "1px solid #1E1E28",
+                  }}
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: "#8B8FA8" }}>Offene Position</span>
+                        <span
+                          className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                          style={{
+                            background: trade.direction === "long" ? "rgba(59,130,246,0.15)" : "rgba(255,77,77,0.15)",
+                            color: trade.direction === "long" ? "#3B82F6" : "#FF4D4D",
+                          }}
+                        >
+                          {trade.direction === "long" ? "LONG" : "SHORT"}
+                        </span>
+                      </div>
+                      <div className="text-lg font-bold text-white font-mono">{trade.certificateId}</div>
                     </div>
-                    {/* P&L % badge */}
-                    {pnlPct != null ? (
-                      <span
-                        className="text-lg font-bold"
-                        style={{ color: pnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}
-                      >
-                        {pnlPct >= 0 ? "+" : ""}{formatNumber(pnlPct, 1)}%
-                      </span>
-                    ) : (
-                      <span className="text-xs" style={{ color: "#8B8FA8" }}>Lade...</span>
-                    )}
+                    <div className="text-right">
+                      {pnlPct != null ? (
+                        <>
+                          <div className="text-2xl font-bold" style={{ color: pnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                            {pnlPct >= 0 ? "+" : ""}{formatNumber(pnlPct, 1)}%
+                          </div>
+                          {pnlEur != null && (
+                            <div className="text-sm font-medium" style={{ color: pnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                              {pnlEur >= 0 ? "+" : ""}{pnlEur.toFixed(0)} €
+                            </div>
+                          )}
+                          <span className="text-[10px]" style={{ color: "#8B8FA8" }}>Unrealisiert</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-2xl font-bold text-white">
+                            {investment ? `${investment.toFixed(0)} €` : "—"}
+                          </div>
+                          <span className="text-[10px]" style={{ color: "#8B8FA8" }}>Investiert</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  {/* Entry / Current price row */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-4 gap-2">
                     <div>
                       <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Einstieg</span>
-                      <span className="text-base font-bold text-white">{formatNumber(pos.entryPrice, 2)} €</span>
+                      <span className="text-sm font-medium text-white">
+                        {trade.entryPrice != null ? `${formatNumber(trade.entryPrice, 2)} €` : "—"}
+                      </span>
                     </div>
                     <div>
                       <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktuell</span>
-                      <span className="text-base font-bold text-white">
-                        {bid != null ? `${formatNumber(bid, 2)} €` : "—"}
+                      <span className="text-sm font-medium" style={{ color: liveBid != null ? "#fff" : "#8B8FA8" }}>
+                        {liveBid != null ? `${formatNumber(liveBid, 2)} €` : "—"}
                       </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Hebel</span>
+                      <span className="text-sm font-medium" style={{ color: "#B8E15A" }}>
+                        {trade.leverageRatio != null ? `×${formatNumber(trade.leverageRatio, 2)}` : "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Barrier</span>
+                      <span className="text-sm font-medium text-white">{formatNumber(trade.barrierLevel, 1)}</span>
+                      {abstand != null && (
+                        <span className="text-[10px] ml-0.5" style={{ color: abstand < 15 ? "#FF4D4D" : abstand < 30 ? "#F59E0B" : "#22C55E" }}>
+                          {abstand.toFixed(0)}%
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {/* P&L EUR row */}
-                  {pnlEur != null && (
-                    <div
-                      className="flex items-center justify-between rounded-lg px-3 py-2"
-                      style={{ background: pnlEur >= 0 ? "rgba(34,197,94,0.08)" : "rgba(255,77,77,0.08)" }}
-                    >
-                      <span className="text-xs" style={{ color: "#8B8FA8" }}>P&amp;L</span>
-                      <span
-                        className="text-sm font-semibold"
-                        style={{ color: pnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}
-                      >
-                        {pnlEur >= 0 ? "+" : ""}{formatNumber(pnlEur, 2)} €
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between pt-1" style={{ borderTop: "1px solid #1E1E28" }}>
-                    <div className="text-xs" style={{ color: "#8B8FA8" }}>
-                      Barrier: {formatNumber(pos.currentBarrier)} | Leverage: {formatNumber(pos.leverageRatio, 1)}x
-                    </div>
-                    <div
-                      className="flex h-8 w-8 items-center justify-center rounded-full"
-                      style={{ background: "#B8E15A" }}
-                    >
+                  <div className="flex items-center justify-between mt-3 pt-2.5" style={{ borderTop: "1px solid #1E1E28" }}>
+                    <span className="text-[10px]" style={{ color: "#8B8FA8" }}>
+                      {new Date(trade.entryDate).toLocaleDateString("de-DE")} · {trade.quantity} Stück · VIX {formatNumber(trade.entryVix)}
+                    </span>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#B8E15A" }}>
                       <BellIcon size={14} className="text-black" />
                     </div>
                   </div>
