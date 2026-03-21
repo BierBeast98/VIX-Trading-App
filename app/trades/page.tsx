@@ -279,21 +279,6 @@ export default function TradesPage() {
       };
     }, [trades]);
 
-  // Live prices for open positions (batch Vontobel fetch)
-  const openIsins = openTrades.map((t) => t.certificateId);
-  const { data: batchData } = useSWR<{ prices: Record<string, { bid: number | null; underlying: number | null }> }>(
-    openIsins.length > 0 ? ["vontobel-batch-trades", ...openIsins] : null,
-    async () => {
-      try {
-        const res = await fetch(`/api/vontobel/batch?isins=${openIsins.join(",")}`);
-        if (res.ok) return res.json();
-      } catch { /* noop */ }
-      return { prices: {} };
-    },
-    { refreshInterval: getRefreshInterval() }
-  );
-  const livePrices = batchData?.prices ?? {};
-
   // Live preview calculations in form
   const formInvestment =
     form.entryPrice && form.quantity
