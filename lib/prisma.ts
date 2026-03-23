@@ -10,20 +10,31 @@
  *             Cron Jobs ohne Beschränkung (anders als Vercel Hobby Plan).
  *
  * Neon    → PostgreSQL-Datenbank (serverless)
- *           Prisma v5 als ORM — NICHT auf v7 updaten (bricht datasource URL Config).
+ *           Prisma v5 mit @prisma/adapter-neon — kein Binary Query Engine (verhindert Panics).
  *           DATABASE_URL = gepoolte Verbindung (für die App)
  *           DIRECT_URL   = direkte Verbindung (für Prisma Migrationen)
  */
 import { PrismaClient } from "@prisma/client";
+import { PrismaNeon } from "@prisma/adapter-neon";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
+
+// WebSocket für Neon serverless in Node.js Umgebung
+neonConfig.webSocketConstructor = ws;
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+function createPrismaClient() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+  const adapter = new PrismaNeon(pool);
+  return new PrismaClient({
+    adapter,
     log: process.env.NODE_ENV === "development" ? ["error"] : [],
   });
+}
+
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
