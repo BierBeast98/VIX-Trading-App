@@ -58,6 +58,7 @@ export default function AnalyticsPage() {
   const [btStepPct, setBtStepPct] = useState("5");
   const [btLeverage, setBtLeverage] = useState("10");
   const [btMaxHold, setBtMaxHold] = useState("60");
+  const [btStopLoss, setBtStopLoss] = useState("0");
   const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [btRunning, setBtRunning] = useState(false);
   const [btHistory, setBtHistory] = useState<{ date: string; close: number }[]>([]);
@@ -81,14 +82,17 @@ export default function AnalyticsPage() {
     const res = await fetch(`/api/vix/historical?period=1y`);
     if (res.ok) {
       const histData = await res.json();
-      setBtHistory(histData.vix ?? []);
-      const result = runBacktest(histData.vix ?? [], {
+      const spotHistory = histData.vix ?? [];
+      const futuresHistory = histData.vix3m ?? [];
+      setBtHistory(spotHistory);
+      const result = runBacktest(spotHistory, {
         entryThreshold: parseFloat(btThreshold),
         targetReturnPct: parseFloat(btTargetReturn),
         stepPct: parseFloat(btStepPct),
         leverageRatio: parseFloat(btLeverage),
         maxHoldDays: parseInt(btMaxHold),
-      });
+        stopLossPct: parseFloat(btStopLoss) || 0,
+      }, futuresHistory.length > 0 ? futuresHistory : undefined);
       setBtResult(result);
     }
     setBtRunning(false);
@@ -216,6 +220,13 @@ export default function AnalyticsPage() {
                     value={btMaxHold}
                     onChange={(e) => setBtMaxHold(e.target.value)}
                   />
+                  <Input
+                    label="Stop-Loss (%, 0 = aus)"
+                    type="number"
+                    step="1"
+                    value={btStopLoss}
+                    onChange={(e) => setBtStopLoss(e.target.value)}
+                  />
                 </div>
                 <Button variant="primary" size="sm" onClick={runBt} loading={btRunning}>
                   Backtest starten
@@ -282,6 +293,16 @@ export default function AnalyticsPage() {
                             </span>
                           )}
                         </div>
+                        {btResult.stopLossExits > 0 && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-2 w-2 rounded-full" style={{ background: "#EF4444" }} />
+                            <span style={{ color: "#8B8FA8" }}>Stop-Loss: </span>
+                            <span className="font-medium" style={{ color: "#EF4444" }}>{btResult.stopLossExits}</span>
+                            <span style={{ color: "#4A4A5A" }}>
+                              ({((btResult.stopLossExits / btResult.tradesSimulated) * 100).toFixed(0)}%)
+                            </span>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5">
                           <div className="h-2 w-2 rounded-full" style={{ background: "#8B8FA8" }} />
                           <span style={{ color: "#8B8FA8" }}>Max-Hold: </span>

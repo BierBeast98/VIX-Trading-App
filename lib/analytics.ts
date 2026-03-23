@@ -89,6 +89,8 @@ export interface BacktestParams {
   leverageRatio: number;
   /** Maximum hold period in days — used as fallback if trailing stop never triggers */
   maxHoldDays: number;
+  /** Hard stop-loss in % (e.g. 20 = exit when certPnl < -20%). 0 = disabled. */
+  stopLossPct: number;
 }
 
 export interface BacktestResult {
@@ -100,6 +102,7 @@ export interface BacktestResult {
   avgHoldDays: number;
   maxDrawdown: number;
   trailingStopExits: number;
+  stopLossExits: number;
   maxHoldExits: number;
   avgEntryVix: number;
   trades: BacktestTrade[];
@@ -111,15 +114,23 @@ export interface BacktestTrade {
   entryVix: number;
   exitVix: number;
   returnPct: number;
-  exitReason: "trailing_stop" | "max_hold";
+  exitReason: "trailing_stop" | "stop_loss" | "max_hold";
   holdDays: number;
 }
 
 export function runBacktest(
   history: { date: string; close: number }[],
-  params: BacktestParams
+  params: BacktestParams,
+  /** Optional VIX futures history — if provided, P&L is calculated on futures prices.
+   *  Entry signal still uses VIX spot (history). Falls back to spot when no futures price exists. */
+  futuresHistory?: { date: string; close: number }[]
 ): BacktestResult {
-  const { entryThreshold, targetReturnPct, stepPct, leverageRatio, maxHoldDays } = params;
+  const { entryThreshold, targetReturnPct, stepPct, leverageRatio, maxHoldDays, stopLossPct } = params;
+
+  // Build date → futures price lookup; falls back to spot when missing
+  const futuresMap = new Map(futuresHistory?.map((d) => [d.date, d.close]) ?? []);
+  const getFuturesPrice = (date: string, spotFallback: number) =>
+    futuresMap.get(date) ?? spotFallback;
 
   const emptyResult = (period: string): BacktestResult => ({
     period,
@@ -130,6 +141,7 @@ export function runBacktest(
     avgHoldDays: 0,
     maxDrawdown: 0,
     trailingStopExits: 0,
+    stopLossExits: 0,
     maxHoldExits: 0,
     avgEntryVix: 0,
     trades: [],
@@ -146,7 +158,7 @@ export function runBacktest(
     exitVix: number;
     return: number;
     holdDays: number;
-    exitReason: "trailing_stop" | "max_hold";
+    exitReason: "trailing_stop" | "stop_loss" | "max_hold";
   }[] = [];
 
   let i = 0;
@@ -155,17 +167,30 @@ export function runBacktest(
     const entryVix = history[i].close;
 
     if (entryVix <= entryThreshold) {
+      // Use futures price at entry for P&L base (falls back to spot)
+      const entryFuturesVix = getFuturesPrice(history[i].date, entryVix);
+
       let peakPnl = 0;
       let floor: number | null = null;
       let exitIdx = Math.min(i + maxHoldDays, history.length - 1);
-      let exitReason: "trailing_stop" | "max_hold" = "max_hold";
+      let exitReason: "trailing_stop" | "stop_loss" | "max_hold" = "max_hold";
       let exitCertPnl = 0;
 
       for (let j = i + 1; j <= Math.min(i + maxHoldDays, history.length - 1); j++) {
-        const vixChangePct = (history[j].close - entryVix) / entryVix * 100;
+        // P&L based on futures price (falls back to spot)
+        const currentFuturesVix = getFuturesPrice(history[j].date, history[j].close);
+        const vixChangePct = (currentFuturesVix - entryFuturesVix) / entryFuturesVix * 100;
         const certPnl = vixChangePct * leverageRatio;
 
         peakPnl = Math.max(peakPnl, certPnl);
+
+        // Hard stop-loss: exit immediately if loss exceeds threshold
+        if (stopLossPct > 0 && certPnl < -stopLossPct) {
+          exitCertPnl = certPnl;
+          exitIdx = j;
+          exitReason = "stop_loss";
+          break;
+        }
 
         // Trailing stop floor: activates when Mindestrendite is reached.
         // Floor starts one step below the target and rises with each additional step.
@@ -186,8 +211,8 @@ export function runBacktest(
       trades.push({
         entryDate: history[i].date,
         exitDate: history[exitIdx].date,
-        entryVix,
-        exitVix: history[exitIdx].close,
+        entryVix,       // spot VIX — entry condition signal
+        exitVix: getFuturesPrice(history[exitIdx].date, history[exitIdx].close), // futures exit price
         return: exitCertPnl,
         holdDays: exitIdx - i,
         exitReason,
@@ -206,6 +231,7 @@ export function runBacktest(
   const totalHoldDays = trades.reduce((a, t) => a + t.holdDays, 0);
   const avgEntryVix = trades.reduce((a, t) => a + t.entryVix, 0) / trades.length;
   const trailingStopExits = trades.filter((t) => t.exitReason === "trailing_stop").length;
+  const stopLossExits = trades.filter((t) => t.exitReason === "stop_loss").length;
 
   let maxDrawdown = 0;
   let peak = 0;
@@ -226,7 +252,8 @@ export function runBacktest(
     avgHoldDays: totalHoldDays / trades.length,
     maxDrawdown,
     trailingStopExits,
-    maxHoldExits: trades.length - trailingStopExits,
+    stopLossExits,
+    maxHoldExits: trades.length - trailingStopExits - stopLossExits,
     avgEntryVix,
     trades: trades.map((t) => ({
       entryDate: t.entryDate,

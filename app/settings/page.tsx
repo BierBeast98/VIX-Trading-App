@@ -87,6 +87,10 @@ export default function SettingsPage() {
     );
   }
 
+  // Prevent React "Received NaN for value" warning when user clears a numeric field
+  const n = (v: number | undefined | null): number | string =>
+    v == null || (typeof v === "number" && isNaN(v)) ? "" : v;
+
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
       {/* Header */}
@@ -163,7 +167,7 @@ export default function SettingsPage() {
               label="Einstiegs-Alert (VIX ≤)"
               type="number"
               step="0.5"
-              value={settings.vixLowThreshold}
+              value={n(settings.vixLowThreshold)}
               onChange={(e) => update("vixLowThreshold", parseFloat(e.target.value))}
               hint="Alert wenn VIX in Low-Fear-Einstiegszone fällt"
             />
@@ -171,14 +175,14 @@ export default function SettingsPage() {
               label="Std-Dev Multiplikator"
               type="number"
               step="0.1"
-              value={settings.stdDevMultiplier}
+              value={n(settings.stdDevMultiplier)}
               onChange={(e) => update("stdDevMultiplier", parseFloat(e.target.value))}
               hint="Alert wenn VIX X Std-Abweichungen vom Mittelwert abweicht"
             />
             <Input
               label="Rolling Window (Tage)"
               type="number"
-              value={settings.rollingWindowDays}
+              value={n(settings.rollingWindowDays)}
               onChange={(e) => update("rollingWindowDays", parseInt(e.target.value))}
               hint="Zeitraum für Mittelwert/Std-Dev Berechnung"
             />
@@ -186,7 +190,7 @@ export default function SettingsPage() {
               label="VIX-Spike Schwelle (%)"
               type="number"
               step="1"
-              value={settings.spikeThresholdPct}
+              value={n(settings.spikeThresholdPct)}
               onChange={(e) => update("spikeThresholdPct", parseFloat(e.target.value))}
               hint="Alert bei Tagesänderung ≥ X% wenn offene Positionen bestehen"
             />
@@ -206,7 +210,7 @@ export default function SettingsPage() {
               label="Zielrendite (%)"
               type="number"
               step="1"
-              value={settings.targetReturnPct}
+              value={n(settings.targetReturnPct)}
               onChange={(e) => update("targetReturnPct", parseFloat(e.target.value))}
               hint="Mindestrendite für Trailing Stop Aktivierung"
             />
@@ -238,7 +242,7 @@ export default function SettingsPage() {
                 label="Zusatzrendite / Stufe (%)"
                 type="number"
                 step="1"
-                value={settings.trailingStopConfig.stepPct}
+                value={n(settings.trailingStopConfig.stepPct)}
                 onChange={(e) => updateTrailingStop("stepPct", parseFloat(e.target.value))}
                 hint="Floor steigt in diesen Schritten mit der Rendite mit"
               />
