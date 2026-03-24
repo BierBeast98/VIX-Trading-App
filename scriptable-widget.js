@@ -4,8 +4,7 @@
 // SETUP:
 //   1. "Scriptable" kostenlos im App Store installieren
 //   2. Dieses Script in Scriptable einfügen (New Script)
-//   3. BASE_URL auf deine Vercel-Domain setzen
-//   4. Widget auf dem Home Screen hinzufügen → Scriptable auswählen
+//   3. Widget auf dem Home Screen hinzufügen → Scriptable auswählen
 //      → dieses Script wählen
 // ============================================================
 
@@ -21,12 +20,14 @@ const DIVIDER_COLOR = new Color("#3A3A3C");
 
 // ---- Daten laden ------------------------------------------
 async function fetchData() {
+  const url = `${BASE_URL}/api/widget`;
   try {
-    const req = new Request(`${BASE_URL}/api/widget`);
-    req.timeoutInterval = 10;
-    return await req.loadJSON();
+    const req = new Request(url);
+    req.timeoutInterval = 15;
+    const json = await req.loadJSON();
+    return { ok: true, data: json, url };
   } catch (e) {
-    return null;
+    return { ok: false, error: String(e), url };
   }
 }
 
@@ -44,7 +45,6 @@ function fmtPct(pct) {
 
 function fmtPrice(price, symbol) {
   if (price === null || price === undefined) return "—";
-  // Ganzzahl für ES=F, sonst 2 Nachkommastellen
   if (symbol === "ES=F" || price > 1000) {
     return price.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -57,7 +57,6 @@ function addMarketRow(stack, symbol, price, changePct) {
   row.layoutHorizontally();
   row.centerAlignContent();
 
-  // Symbol links
   const sym = row.addText(symbol);
   sym.font = Font.boldSystemFont(15);
   sym.textColor = TEXT_WHITE;
@@ -65,7 +64,6 @@ function addMarketRow(stack, symbol, price, changePct) {
 
   row.addSpacer();
 
-  // Preis + % rechts
   const rightStack = row.addStack();
   rightStack.layoutVertically();
   rightStack.addSpacer(1);
@@ -122,20 +120,36 @@ function addDivider(stack) {
 }
 
 // ---- Widget aufbauen --------------------------------------
-async function buildWidget(data) {
+async function buildWidget(result) {
   const widget = new ListWidget();
   widget.backgroundColor = BG_COLOR;
   widget.setPadding(14, 14, 14, 14);
-
-  // Refresh alle 5 Minuten
   widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
 
-  if (!data) {
-    const err = widget.addText("Keine Daten");
-    err.textColor = TEXT_GRAY;
-    err.font = Font.systemFont(13);
+  // ── Fehlerfall: zeige Fehlermeldung zur Diagnose ─────────
+  if (!result || !result.ok) {
+    const t1 = widget.addText("⚠️ Keine Daten");
+    t1.textColor = RED;
+    t1.font = Font.boldSystemFont(12);
+
+    widget.addSpacer(6);
+
+    const t2 = widget.addText(result?.error || "Unbekannter Fehler");
+    t2.textColor = TEXT_GRAY;
+    t2.font = Font.systemFont(10);
+    t2.minimumScaleFactor = 0.4;
+
+    widget.addSpacer(4);
+
+    const t3 = widget.addText(result?.url || BASE_URL);
+    t3.textColor = TEXT_GRAY;
+    t3.font = Font.systemFont(9);
+    t3.minimumScaleFactor = 0.4;
+
     return widget;
   }
+
+  const data = result.data;
 
   const root = widget.addStack();
   root.layoutVertically();
@@ -163,7 +177,7 @@ async function buildWidget(data) {
     }
   }
 
-  // Offene Positionen (nur bei Medium-Widget oder wenn Platz)
+  // Offene Positionen (nur bei Medium-Widget)
   const positions = data.positions || [];
   if (positions.length > 0 && config.widgetFamily !== "small") {
     root.addSpacer(4);
@@ -189,13 +203,12 @@ async function buildWidget(data) {
 }
 
 // ---- Main -------------------------------------------------
-const data = await fetchData();
-const widget = await buildWidget(data);
+const result = await fetchData();
+const widget = await buildWidget(result);
 
 if (config.runsInWidget) {
   Script.setWidget(widget);
 } else {
-  // Vorschau in der App
   await widget.presentMedium();
 }
 
