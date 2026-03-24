@@ -20,7 +20,7 @@ const DIVIDER_COLOR = new Color("#3A3A3C");
 
 // ---- Daten laden ------------------------------------------
 async function fetchData() {
-  const url = `${BASE_URL}/api/widget`;
+  const url = BASE_URL + "/api/widget";
   try {
     const req = new Request(url);
     req.timeoutInterval = 15;
