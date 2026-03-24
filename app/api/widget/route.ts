@@ -64,12 +64,13 @@ export async function GET() {
   ];
 
   const openPositions = positions.map((p) => {
-    const pnlPct =
+    const rawPnl =
       p.entryPrice > 0
-        ? parseFloat(
-            (((p.currentPrice - p.entryPrice) / p.entryPrice) * 100).toFixed(2)
-          )
+        ? p.direction === "short"
+          ? ((p.entryPrice - p.currentPrice) / p.entryPrice) * 100
+          : ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100
         : 0;
+    const pnlPct = parseFloat(rawPnl.toFixed(2));
     return {
       name: p.name || p.direction,
       entryPrice: parseFloat(p.entryPrice.toFixed(4)),

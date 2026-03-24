@@ -192,7 +192,7 @@ async function buildWidget(data) {
 const data = await fetchData();
 const widget = await buildWidget(data);
 
-if (config.runInWidget) {
+if (config.runsInWidget) {
   Script.setWidget(widget);
 } else {
   // Vorschau in der App
