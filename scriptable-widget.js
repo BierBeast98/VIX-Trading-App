@@ -9,7 +9,7 @@
 //      → dieses Script wählen
 // ============================================================
 
-const BASE_URL = "https://deine-domain.de"; // <-- HIER ANPASSEN
+const BASE_URL = "https://vix-trading.de";
 
 // ---- Farben ------------------------------------------------
 const BG_COLOR      = new Color("#1C1C1E");
