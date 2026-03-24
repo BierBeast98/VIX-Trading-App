@@ -307,6 +307,11 @@ export async function getVontobelCertificateIntraday(isin?: string): Promise<His
   }
 }
 
+/** E-mini S&P 500 front-month futures (ES=F) — real-time quote */
+export async function getSpFutures(): Promise<VixQuote | null> {
+  return fetchQuote("ES=F");
+}
+
 export async function getVixIntraday(): Promise<HistoricalPoint[]> {
   try {
     const result = await (yahooFinance as any).chart("^VIX", {
