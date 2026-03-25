@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getVixSpot, getVixFutures, getSpFutures } from "@/lib/yahoo-finance";
+import { getVixSpot, getSpFutures, getVontobelFuturesQuote } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
 import { prisma } from "@/lib/prisma";
 
@@ -30,10 +30,20 @@ export async function GET() {
     return NextResponse.json(cached, { headers: CORS_HEADERS });
   }
 
+  // Vontobel ISIN aus Settings lesen (Fallback auf Default)
+  let vontobelIsin: string | undefined;
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 1 },
+      select: { vontobelIsin: true },
+    });
+    vontobelIsin = settings?.vontobelIsin || undefined;
+  } catch { /* use default */ }
+
   const [vixResult, vxResult, esResult, positionsResult] =
     await Promise.allSettled([
       withTimeout(getVixSpot(), 8000),
-      withTimeout(getVixFutures(), 8000),
+      withTimeout(getVontobelFuturesQuote(vontobelIsin), 8000),
       withTimeout(getSpFutures(), 8000),
       prisma.position.findMany({
         where: { status: "open" },
@@ -48,10 +58,16 @@ export async function GET() {
     ]);
 
   const vix = vixResult.status === "fulfilled" ? vixResult.value : null;
-  const vx = vxResult.status === "fulfilled" ? vxResult.value : null;
+  const vxRaw = vxResult.status === "fulfilled" ? vxResult.value : null;
   const es = esResult.status === "fulfilled" ? esResult.value : null;
   const positions =
     positionsResult.status === "fulfilled" ? positionsResult.value : [];
+
+  // changePct aus Vontobel previousClose berechnen
+  const vxChangePct =
+    vxRaw && vxRaw.previousClose > 0
+      ? ((vxRaw.price - vxRaw.previousClose) / vxRaw.previousClose) * 100
+      : null;
 
   const markets = [
     {
@@ -61,8 +77,8 @@ export async function GET() {
     },
     {
       symbol: "VX",
-      price: vx ? parseFloat(vx.price.toFixed(2)) : null,
-      changePct: vx ? parseFloat(vx.changePct.toFixed(2)) : null,
+      price: vxRaw ? parseFloat(vxRaw.price.toFixed(2)) : null,
+      changePct: vxChangePct != null ? parseFloat(vxChangePct.toFixed(2)) : null,
     },
     {
       symbol: "ES=F",
