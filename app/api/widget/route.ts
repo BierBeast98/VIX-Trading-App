@@ -16,6 +16,14 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
+/** Wraps a promise with a timeout — returns null on timeout */
+function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export async function GET() {
   const cached = memGet<object>(CACHE_KEY);
   if (cached) {
@@ -24,9 +32,9 @@ export async function GET() {
 
   const [vixResult, vxResult, esResult, positionsResult] =
     await Promise.allSettled([
-      getVixSpot(),
-      getVixFutures(),
-      getSpFutures(),
+      withTimeout(getVixSpot(), 8000),
+      withTimeout(getVixFutures(), 8000),
+      withTimeout(getSpFutures(), 8000),
       prisma.position.findMany({
         where: { status: "open" },
         select: {
