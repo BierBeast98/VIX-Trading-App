@@ -20,14 +20,21 @@ const DIVIDER_COLOR = new Color("#3A3A3C");
 
 // ---- Daten laden ------------------------------------------
 async function fetchData() {
-  const url = BASE_URL + "/api/widget";
+  const url = "https://vix-trading.de/api/widget";
+  let rawText = null;
   try {
     const req = new Request(url);
     req.timeoutInterval = 15;
-    const json = await req.loadJSON();
+    rawText = await req.loadString();
+    const json = JSON.parse(rawText);
     return { ok: true, data: json, url };
   } catch (e) {
-    return { ok: false, error: String(e), url };
+    return {
+      ok: false,
+      error: String(e),
+      url,
+      raw: rawText ? rawText.substring(0, 120) : "no response",
+    };
   }
 }
 
@@ -128,23 +135,22 @@ async function buildWidget(result) {
 
   // ── Fehlerfall: zeige Fehlermeldung zur Diagnose ─────────
   if (!result || !result.ok) {
-    const t1 = widget.addText("⚠️ Keine Daten");
+    const t1 = widget.addText("Fehler:");
     t1.textColor = RED;
     t1.font = Font.boldSystemFont(12);
-
-    widget.addSpacer(6);
+    widget.addSpacer(4);
 
     const t2 = widget.addText(result?.error || "Unbekannter Fehler");
     t2.textColor = TEXT_GRAY;
     t2.font = Font.systemFont(10);
     t2.minimumScaleFactor = 0.4;
-
     widget.addSpacer(4);
 
-    const t3 = widget.addText(result?.url || BASE_URL);
+    const rawInfo = result?.raw || "—";
+    const t3 = widget.addText("Raw: " + rawInfo);
     t3.textColor = TEXT_GRAY;
     t3.font = Font.systemFont(9);
-    t3.minimumScaleFactor = 0.4;
+    t3.minimumScaleFactor = 0.3;
 
     return widget;
   }
