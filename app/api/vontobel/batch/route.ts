@@ -6,7 +6,7 @@
  * on the dashboard (N positions × 2 calls → 1 call).
  *
  * Uses the same in-memory cache keys as the individual routes so both share
- * the same warm cache within a Vercel function instance.
+ * the same warm cache within the Node.js process.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";

@@ -5,9 +5,9 @@
  *           Jeder Push zu `main` triggert automatisch ein Deployment auf Hostinger.
  *
  * Hostinger → Hosting + Domain (vix-trading.de)
- *             Next.js läuft auf Node.js 22.x direkt auf Hostinger (kein Vercel nötig!).
+ *             Next.js läuft auf Node.js 22.x direkt auf Hostinger.
  *             Env Vars setzen unter: Einsätze → Einstellungen und erneute Bereitstellung
- *             Cron Jobs ohne Beschränkung (anders als Vercel Hobby Plan).
+ *             Cron Jobs ohne Beschränkung.
  *
  * Neon    → PostgreSQL-Datenbank (serverless)
  *           Prisma v5 mit @prisma/adapter-neon — kein Binary Query Engine (verhindert Panics).

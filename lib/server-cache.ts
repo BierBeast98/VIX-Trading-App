@@ -1,8 +1,8 @@
 /**
  * Lightweight in-memory cache for server-side API routes.
  * Module-level state persists across requests within the same
- * Vercel serverless function instance — eliminates redundant
- * external API calls (Yahoo Finance, Vontobel, Supabase).
+ * Node.js process on Hostinger — eliminates redundant
+ * external API calls (Yahoo Finance, Vontobel, Neon).
  */
 
 interface CacheEntry<T> {
