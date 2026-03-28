@@ -32,7 +32,7 @@ export function Modal({ open, onClose, title, children, className, size = "md" }
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pb-20 lg:pb-4">
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
@@ -55,7 +55,7 @@ export function Modal({ open, onClose, title, children, className, size = "md" }
             <X size={18} />
           </button>
         </div>
-        <div className="p-6 overflow-y-auto" style={{ maxHeight: "calc(100vh - 10rem)" }}>{children}</div>
+        <div className="p-6 overflow-y-auto" style={{ maxHeight: "calc(100dvh - 14rem)" }}>{children}</div>
       </div>
     </div>
   );

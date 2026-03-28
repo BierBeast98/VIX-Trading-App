@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getVixSpot, getSpFutures, getVontobelFuturesQuote } from "@/lib/yahoo-finance";
+import { getVixSpot, getSpFutures, getVontobelFuturesQuote, getVontobelCertificatePrice } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
 import { prisma } from "@/lib/prisma";
 
@@ -49,6 +49,7 @@ export async function GET() {
         where: { status: "open" },
         select: {
           name: true,
+          certificateId: true,
           entryPrice: true,
           currentPrice: true,
           direction: true,
@@ -62,6 +63,24 @@ export async function GET() {
   const es = esResult.status === "fulfilled" ? esResult.value : null;
   const positions =
     positionsResult.status === "fulfilled" ? positionsResult.value : [];
+
+  // Live-Preise für offene Positionen via Vontobel holen (mit shared In-Memory Cache)
+  const CERT_PRICE_TTL = 5 * 60 * 1000;
+  const livePrices: Record<string, number | null> = {};
+  await Promise.all(
+    positions.map(async (p) => {
+      if (!p.certificateId) return;
+      const cacheKey = `vontobel_cert_price_${p.certificateId}`;
+      const cached = memGet<number>(cacheKey);
+      if (cached != null) {
+        livePrices[p.certificateId] = cached;
+        return;
+      }
+      const bid = await withTimeout(getVontobelCertificatePrice(p.certificateId), 8000);
+      livePrices[p.certificateId] = bid;
+      if (bid != null) memSet(cacheKey, bid, CERT_PRICE_TTL);
+    })
+  );
 
   // changePct aus Vontobel previousClose berechnen
   const vxChangePct =
@@ -88,17 +107,19 @@ export async function GET() {
   ];
 
   const openPositions = positions.map((p) => {
+    const livePrice = p.certificateId ? livePrices[p.certificateId] : null;
+    const currentPrice = livePrice ?? p.currentPrice;
     const rawPnl =
       p.entryPrice > 0
         ? p.direction === "short"
-          ? ((p.entryPrice - p.currentPrice) / p.entryPrice) * 100
-          : ((p.currentPrice - p.entryPrice) / p.entryPrice) * 100
+          ? ((p.entryPrice - currentPrice) / p.entryPrice) * 100
+          : ((currentPrice - p.entryPrice) / p.entryPrice) * 100
         : 0;
     const pnlPct = parseFloat(rawPnl.toFixed(2));
     return {
       name: p.name || p.direction,
       entryPrice: parseFloat(p.entryPrice.toFixed(4)),
-      currentPrice: parseFloat(p.currentPrice.toFixed(4)),
+      currentPrice: parseFloat(currentPrice.toFixed(4)),
       pnlPct,
       direction: p.direction,
     };

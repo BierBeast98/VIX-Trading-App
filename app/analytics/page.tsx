@@ -53,12 +53,14 @@ export default function AnalyticsPage() {
   const { data: settings } = useSWR<Settings>("/api/settings");
 
   // Backtesting state
-  const [btThreshold, setBtThreshold] = useState("15");
+  const [btDirection, setBtDirection] = useState<"long" | "short">("short");
+  const [btThreshold, setBtThreshold] = useState("25");
   const [btTargetReturn, setBtTargetReturn] = useState("18");
   const [btStepPct, setBtStepPct] = useState("5");
   const [btLeverage, setBtLeverage] = useState("10");
   const [btMaxHold, setBtMaxHold] = useState("60");
   const [btStopLoss, setBtStopLoss] = useState("0");
+  const [btKnockout, setBtKnockout] = useState("0");
   const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [btRunning, setBtRunning] = useState(false);
   const [btHistory, setBtHistory] = useState<{ date: string; close: number }[]>([]);
@@ -71,7 +73,6 @@ export default function AnalyticsPage() {
   // Pre-fill backtest params from saved settings
   useEffect(() => {
     if (settings) {
-      setBtThreshold(String(settings.vixLowThreshold ?? 15));
       setBtTargetReturn(String(settings.targetReturnPct ?? 18));
       setBtStepPct(String(settings.trailingStopConfig?.stepPct ?? 5));
     }
@@ -86,12 +87,14 @@ export default function AnalyticsPage() {
       const futuresHistory = histData.vix3m ?? [];
       setBtHistory(spotHistory);
       const result = runBacktest(spotHistory, {
+        direction: btDirection,
         entryThreshold: parseFloat(btThreshold),
         targetReturnPct: parseFloat(btTargetReturn),
         stepPct: parseFloat(btStepPct),
         leverageRatio: parseFloat(btLeverage),
         maxHoldDays: parseInt(btMaxHold),
         stopLossPct: parseFloat(btStopLoss) || 0,
+        knockoutBarrierPct: parseFloat(btKnockout) || 0,
       }, futuresHistory.length > 0 ? futuresHistory : undefined);
       setBtResult(result);
     }
@@ -181,13 +184,35 @@ export default function AnalyticsPage() {
                 <CardTitle className="text-sm font-semibold text-white">Backtesting (1 Jahr)</CardTitle>
               </CardHeader>
               <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
-                Einstieg wenn VIX ≤ Einstiegsniveau. Ausstieg per Trailing Stop (ab Mindestrendite,
-                Schritt = {btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.
+                {btDirection === "short"
+                  ? `Einstieg wenn VIX ≥ Einstiegsniveau (Short). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.`
+                  : `Einstieg wenn VIX ≤ Einstiegsniveau (Long). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.`}
               </p>
               <div className="space-y-3">
+                {/* Direction Toggle */}
+                <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: "#1E1E28" }}>
+                  {(["short", "long"] as const).map((dir) => (
+                    <button
+                      key={dir}
+                      onClick={() => {
+                        setBtDirection(dir);
+                        setBtThreshold(dir === "short" ? "25" : "15");
+                      }}
+                      className="flex-1 py-2 text-sm font-medium transition-colors"
+                      style={{
+                        background: btDirection === dir ? (dir === "short" ? "#FF4D4D22" : "#22C55E22") : "transparent",
+                        color: btDirection === dir ? (dir === "short" ? "#FF4D4D" : "#22C55E") : "#8B8FA8",
+                        borderRight: dir === "short" ? "1px solid #1E1E28" : undefined,
+                      }}
+                    >
+                      {dir === "short" ? "↓ Short VIX" : "↑ Long VIX"}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <Input
-                    label="Einstiegsniveau (VIX ≤)"
+                    label={btDirection === "short" ? "Einstiegsniveau (VIX ≥)" : "Einstiegsniveau (VIX ≤)"}
                     type="number"
                     step="0.5"
                     value={btThreshold}
@@ -226,6 +251,13 @@ export default function AnalyticsPage() {
                     step="1"
                     value={btStopLoss}
                     onChange={(e) => setBtStopLoss(e.target.value)}
+                  />
+                  <Input
+                    label={btDirection === "short" ? "KO-Barrier (% über Entry, 0 = aus)" : "KO-Barrier (% unter Entry, 0 = aus)"}
+                    type="number"
+                    step="1"
+                    value={btKnockout}
+                    onChange={(e) => setBtKnockout(e.target.value)}
                   />
                 </div>
                 <Button variant="primary" size="sm" onClick={runBt} loading={btRunning}>
@@ -282,7 +314,7 @@ export default function AnalyticsPage() {
                     {/* Exit reason breakdown */}
                     <div className="pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
                       <div className="text-xs mb-1.5" style={{ color: "#8B8FA8" }}>Ausstiegsgründe</div>
-                      <div className="flex gap-4 text-sm">
+                      <div className="flex flex-wrap gap-3 text-sm">
                         <div className="flex items-center gap-1.5">
                           <div className="h-2 w-2 rounded-full" style={{ background: "#B8E15A" }} />
                           <span style={{ color: "#8B8FA8" }}>Trailing Stop: </span>
@@ -300,6 +332,16 @@ export default function AnalyticsPage() {
                             <span className="font-medium" style={{ color: "#EF4444" }}>{btResult.stopLossExits}</span>
                             <span style={{ color: "#4A4A5A" }}>
                               ({((btResult.stopLossExits / btResult.tradesSimulated) * 100).toFixed(0)}%)
+                            </span>
+                          </div>
+                        )}
+                        {btResult.knockoutExits > 0 && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-2 w-2 rounded-full" style={{ background: "#FF6B00" }} />
+                            <span style={{ color: "#8B8FA8" }}>Knockout: </span>
+                            <span className="font-medium" style={{ color: "#FF6B00" }}>{btResult.knockoutExits}</span>
+                            <span style={{ color: "#4A4A5A" }}>
+                              ({((btResult.knockoutExits / btResult.tradesSimulated) * 100).toFixed(0)}%)
                             </span>
                           </div>
                         )}

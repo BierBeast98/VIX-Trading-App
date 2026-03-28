@@ -96,16 +96,6 @@ export function VixHistoryChart({
     })(),
   }));
 
-  // For medium/long periods, deduplicate labels so each month/year appears only once
-  const seenLabels = new Set<string>();
-  const dedupedFormatted = (isLongPeriod || isMediumPeriod)
-    ? formatted.map((d) => {
-        if (seenLabels.has(d.label)) return { ...d, label: "" };
-        seenLabels.add(d.label);
-        return d;
-      })
-    : formatted;
-
   const allValues = [
     ...data.map((d) => d.close),
     ...futuresData.map((d) => d.close),
@@ -114,29 +104,29 @@ export function VixHistoryChart({
   const minVal = allValues.length ? Math.min(...allValues) - 1 : 0;
   const maxVal = allValues.length ? Math.max(...allValues) + 1 : 100;
 
-  // Target ~5 visible labels to avoid overlap on mobile
+  // Build evenly-spaced tick dates (~5 visible) using unique labels as anchors
   const TARGET_TICKS = 5;
-  const nonEmptyIndices = dedupedFormatted
-    .map((d, i) => (d.label !== "" ? i : -1))
-    .filter((i) => i >= 0);
-  const step = Math.max(1, Math.floor(nonEmptyIndices.length / TARGET_TICKS));
-  const visibleSet = new Set<number>();
-  // Always show first and last
-  if (nonEmptyIndices.length > 0) {
-    visibleSet.add(nonEmptyIndices[0]);
-    visibleSet.add(nonEmptyIndices[nonEmptyIndices.length - 1]);
-    for (let i = 0; i < nonEmptyIndices.length; i += step) {
-      visibleSet.add(nonEmptyIndices[i]);
+  const uniqueLabelDates: string[] = [];
+  const seenLabels = new Set<string>();
+  for (const d of formatted) {
+    if (d.label && !seenLabels.has(d.label)) {
+      seenLabels.add(d.label);
+      uniqueLabelDates.push(d.date);
     }
   }
-  const tickFilteredData = dedupedFormatted.map((d, i) => ({
-    ...d,
-    label: visibleSet.has(i) ? d.label : "",
-  }));
+  const tickStep = Math.max(1, Math.floor(uniqueLabelDates.length / TARGET_TICKS));
+  const visibleTicks: string[] = [];
+  for (let i = 0; i < uniqueLabelDates.length; i += tickStep) {
+    visibleTicks.push(uniqueLabelDates[i]);
+  }
+  if (uniqueLabelDates.length > 0) {
+    const last = uniqueLabelDates[uniqueLabelDates.length - 1];
+    if (visibleTicks[visibleTicks.length - 1] !== last) visibleTicks.push(last);
+  }
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={tickFilteredData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+      <ComposedChart data={formatted} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
         <defs>
           <linearGradient id="vixGradient" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#B8E15A" stopOpacity={0.3} />
@@ -149,12 +139,15 @@ export function VixHistoryChart({
           vertical={false}
         />
         <XAxis
-          dataKey="label"
+          dataKey="date"
+          ticks={visibleTicks}
           tick={{ fill: "#8B8FA8", fontSize: 11 }}
           axisLine={false}
           tickLine={false}
-          interval={0}
-          tickFormatter={(v: string) => v}
+          tickFormatter={(dateStr: string) => {
+            try { return format(new Date(dateStr), labelFormat, { locale: de }); }
+            catch { return ""; }
+          }}
         />
         <YAxis
           domain={[minVal, maxVal]}

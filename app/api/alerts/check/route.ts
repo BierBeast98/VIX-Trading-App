@@ -34,6 +34,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: "No settings or email configured" });
     }
 
+    /** Returns true if the same alertType was already sent within the last 30 minutes */
+    async function isOnCooldown(alertType: string): Promise<boolean> {
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+      const recent = await prisma.alertLog.findFirst({
+        where: { alertType, sentAt: { gte: cutoff } },
+        select: { id: true },
+      });
+      return recent !== null;
+    }
+
     const alertSettings: AlertSettings = {
       vixLowThreshold: settings.vixLowThreshold,
       stdDevMultiplier: settings.stdDevMultiplier,
@@ -67,14 +77,25 @@ export async function GET(req: NextRequest) {
       if (stdAlert) triggered.push(stdAlert);
     }
 
-    // VIX Spike alert — based on VIX Future + certificate prices
+    // VIX Spot Spike (Yahoo Finance — already fetched, most reliable source for VIX)
+    if (Math.abs(spot.changePct) >= alertSettings.spikeThresholdPct) {
+      const dir = spot.changePct > 0 ? "gestiegen" : "gefallen";
+      triggered.push({
+        type: "spike",
+        message: `VIX Spike: ${spot.changePct >= 0 ? "+" : ""}${spot.changePct.toFixed(1)}% ${dir} (${spot.previousClose.toFixed(2)} → ${spot.price.toFixed(2)})`,
+        vixLevel: spot.price,
+        urgency: spot.changePct > 0 ? "high" : "medium",
+        details: { source: "spot", changePct: spot.changePct, previousClose: spot.previousClose, price: spot.price },
+      });
+    }
+
+    // VX Futures Spike (Vontobel) — unabhängig von offenen Positionen
     const positions = await prisma.position.findMany({ where: { status: "open" } });
-    if (positions.length > 0) {
+    {
       const vontobelIsin = settings.vontobelIsin || undefined;
       const futureQuote = await getVontobelFuturesQuote(vontobelIsin);
 
       if (futureQuote && futureQuote.previousClose > 0) {
-        // Fetch current bid prices for each position's certificate
         const bidPrices = await Promise.all(
           positions.map(async (p) => {
             try {
@@ -166,8 +187,10 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Send emails and log
+    // Send emails and log — with 30-min cooldown per alert type
+    const sent: AlertResult[] = [];
     for (const alert of triggered) {
+      if (await isOnCooldown(alert.type)) continue;
       if (settings.alertEmail) {
         await sendAlertEmail(alert, settings.alertEmail);
       }
@@ -178,13 +201,15 @@ export async function GET(req: NextRequest) {
           vixLevel: spot.price,
         },
       });
+      sent.push(alert);
     }
 
     return NextResponse.json({
       checked: true,
       vix: spot.price,
       alertsTriggered: triggered.length,
-      alerts: triggered.map((a) => a.message),
+      alertsSent: sent.length,
+      alerts: triggered.map((a) => ({ type: a.type, message: a.message, sent: sent.includes(a) })),
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

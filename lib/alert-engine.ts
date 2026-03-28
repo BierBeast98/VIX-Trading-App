@@ -95,7 +95,7 @@ export function checkVixSpike(
   positions: SpikePosition[],
   settings: AlertSettings
 ): AlertResult | null {
-  if (futurePrevClose <= 0 || positions.length === 0) return null;
+  if (futurePrevClose <= 0) return null;
 
   const futureChangePct = ((futurePrice - futurePrevClose) / futurePrevClose) * 100;
   if (Math.abs(futureChangePct) < settings.spikeThresholdPct) return null;
@@ -115,14 +115,16 @@ export function checkVixSpike(
     };
   });
 
-  const positionSummary = posDetails.map((d) => d.text).join("; ");
+  const positionSummary = posDetails.length > 0
+    ? `. Positionen: ${posDetails.map((d) => d.text).join("; ")}`
+    : "";
 
   // VIX Future rising is dangerous for short-VIX certificates
   const isAdverse = futureChangePct > 0;
 
   return {
     type: "spike",
-    message: `VIX-Future-Spike: ${futureChangePct >= 0 ? "+" : ""}${futureChangePct.toFixed(1)}% ${direction} (${futurePrevClose.toFixed(2)} → ${futurePrice.toFixed(2)}). Positionen: ${positionSummary}`,
+    message: `VIX-Future-Spike: ${futureChangePct >= 0 ? "+" : ""}${futureChangePct.toFixed(1)}% ${direction} (${futurePrevClose.toFixed(2)} → ${futurePrice.toFixed(2)})${positionSummary}`,
     vixLevel: futurePrice,
     urgency: isAdverse ? "high" : "medium",
     details: {

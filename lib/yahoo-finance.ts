@@ -312,6 +312,34 @@ export async function getSpFutures(): Promise<VixQuote | null> {
   return fetchQuote("ES=F");
 }
 
+/** Fetch current bid price for a Vontobel certificate by ISIN */
+export async function getVontobelCertificatePrice(
+  isin: string
+): Promise<number | null> {
+  try {
+    const resp = await fetch(
+      `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0/0?c=de-de`,
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Referer: "https://markets.vontobel.com/",
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "de-DE,de;q=0.9",
+        },
+        signal: AbortSignal.timeout(8_000),
+      }
+    );
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    const series: any[] = json?.payload?.series ?? [];
+    const productSeries = series.find((s: any) => s.isProduct === true);
+    return productSeries?.points?.[0]?.bid ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getVixIntraday(): Promise<HistoricalPoint[]> {
   try {
     const result = await (yahooFinance as any).chart("^VIX", {
