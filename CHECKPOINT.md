@@ -226,8 +226,13 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Verifiziert via Preview: Button sichtbar (mobil), Klick-Flow getestet (Position weg aus `/api/positions` + `/api/trades`), Screenshot bestätigt.
 - Hinweis: Dev-Server hatte einen Turbopack-Panic auf `/trades/page` (interner Next-Bug, kein Code-Fehler) → Neustart half.
 
+### Session 6 (2026-06-29) — Analytics: Gesamt- & annualisierte Rendite
+- `lib/analytics.ts` — `PerformanceMetrics` erweitert um `compoundReturn` (kumuliert, ∏(1+rᵢ)−1), `annualizedReturn` ((1+compound)^(365.25/Tage)−1), `periodDays`, `firstTradeDate`, `lastTradeDate`. Annualisierung mit Totalverlust-Guard (Faktor ≤ 0 → −100 %).
+- `app/analytics/page.tsx` — neue Karte „Rendite über die Zeit" (Gesamtrendite kumuliert + Annualisiert aufs Jahr + Ø/Trade, mit Zeitraum-Header). KPI „Gesamtrendite" zeigt jetzt die kumulierte statt der naiven Summe. Annualisierung erst ab ≥2 Trades & ≥14 Tagen aussagekräftig (sonst „—").
+- Verifiziert: Mathe geprüft (z.B. +70,94 % über 4,8 Mon. → +287 % annualisiert), Screenshot bestätigt. API spreadt Metrics unverändert — keine Route-Änderung nötig.
+
 ### Offene Punkte / Nächste Schritte
-- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen)
+- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics)
 - Optional: Desktop-`handleClosePosition` schließt aktuell nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden
 - Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`)
 

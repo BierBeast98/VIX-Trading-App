@@ -26,6 +26,11 @@ interface Metrics {
   bestTrade: number;
   worstTrade: number;
   totalReturn: number;
+  compoundReturn: number;
+  annualizedReturn: number;
+  periodDays: number;
+  firstTradeDate: string | null;
+  lastTradeDate: string | null;
   alertTriggeredCount: number;
 }
 
@@ -120,9 +125,15 @@ export default function AnalyticsPage() {
     { label: "Sharpe Ratio", value: formatNumber(m.sharpeRatio, 2), color: m.sharpeRatio >= 1 ? "#22C55E" : "#F59E0B" },
     { label: "Bester Trade", value: formatPct(m.bestTrade), color: "#22C55E" },
     { label: "Schlechtester Trade", value: formatPct(m.worstTrade), color: "#FF4D4D" },
-    { label: "Gesamtrendite", value: formatPct(m.totalReturn), color: m.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" },
+    { label: "Gesamt (kumuliert)", value: formatPct(m.compoundReturn), color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" },
     { label: "Alert-getriggert", value: `${m.alertTriggeredCount}/${m.closedTrades}`, color: "#B8E15A" },
   ] : [];
+
+  // Annualisierung erst ab genug Historie aussagekräftig
+  const annualizedReliable = !!m && m.closedTrades >= 2 && m.periodDays >= 14;
+  const fmtDate = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+  const monthsLabel = m && m.periodDays > 0 ? (m.periodDays / 30.44).toFixed(1) : "0";
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -143,6 +154,54 @@ export default function AnalyticsPage() {
               </Card>
             ))}
           </div>
+
+          {/* Rendite über die Zeit */}
+          {m && m.closedTrades > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-semibold text-white">Rendite über die Zeit</CardTitle>
+                <span className="text-xs" style={{ color: "#8B8FA8" }}>
+                  {fmtDate(m.firstTradeDate)} – {fmtDate(m.lastTradeDate)} · {monthsLabel} Mon. · {m.closedTrades} Trades
+                </span>
+              </CardHeader>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Gesamtrendite kumuliert */}
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Gesamtrendite (kumuliert)</div>
+                  <div className="text-3xl font-bold" style={{ color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {formatPct(m.compoundReturn)}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
+                    Summe der Einzeltrades: {formatPct(m.totalReturn)}
+                  </div>
+                </div>
+
+                {/* Annualisiert */}
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Annualisiert (aufs Jahr)</div>
+                  <div className="text-3xl font-bold" style={{ color: !annualizedReliable ? "#8B8FA8" : m.annualizedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {annualizedReliable ? formatPct(m.annualizedReturn) : "—"}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
+                    {annualizedReliable
+                      ? `hochgerechnet aus ${monthsLabel} Mon.`
+                      : "zu wenig Historie (min. 2 Trades, 14 Tage)"}
+                  </div>
+                </div>
+
+                {/* Ø pro Trade */}
+                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Rendite / Trade</div>
+                  <div className="text-3xl font-bold" style={{ color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {formatPct(m.avgReturn)}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
+                    Ø Haltedauer {m.avgHoldDays.toFixed(0)}d
+                  </div>
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Entry Level Analysis */}
           {data?.entryAnalysis && data.entryAnalysis.length > 0 && (

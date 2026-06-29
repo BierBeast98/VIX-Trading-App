@@ -26,7 +26,18 @@ export interface PerformanceMetrics {
   sharpeRatio: number;
   bestTrade: number;
   worstTrade: number;
+  /** Naive Summe aller Einzelrenditen (%) — additive Sicht */
   totalReturn: number;
+  /** Kumulierte/verzinste Gesamtrendite (%) — ∏(1+rᵢ)−1, wie sich das Kapital über die Zeit entwickelt hat */
+  compoundReturn: number;
+  /** Auf ein Jahr hochgerechnete Rendite (%) — (1+compound)^(365.25/Tage)−1 */
+  annualizedReturn: number;
+  /** Kalendertage vom ersten Einstieg bis zum letzten Ausstieg */
+  periodDays: number;
+  /** ISO-Datum des ersten Einstiegs (oder null) */
+  firstTradeDate: string | null;
+  /** ISO-Datum des letzten Ausstiegs (oder null) */
+  lastTradeDate: string | null;
   alertTriggeredCount: number;
   earlyExitCount: number;
 }
@@ -49,6 +60,11 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
       bestTrade: 0,
       worstTrade: 0,
       totalReturn: 0,
+      compoundReturn: 0,
+      annualizedReturn: 0,
+      periodDays: 0,
+      firstTradeDate: null,
+      lastTradeDate: null,
       alertTriggeredCount: 0,
       earlyExitCount: 0,
     };
@@ -58,6 +74,26 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
   const wins = returns.filter((r) => r > 0);
   const losses = returns.filter((r) => r < 0);
   const holdDays = closed.map((t) => t.holdDays ?? 0).filter((d) => d > 0);
+
+  // Kumulierte (verzinste) Gesamtrendite: Kapital läuft sequentiell durch alle Trades
+  const compoundFactor = closed.reduce((acc, t) => acc * (1 + t.returnPct! / 100), 1);
+  const compoundReturn = (compoundFactor - 1) * 100;
+
+  // Zeitraum: erster Einstieg → letzter Ausstieg
+  const entryTimes = closed.map((t) => new Date(t.entryDate).getTime());
+  const exitTimes = closed.map((t) => new Date(t.exitDate!).getTime());
+  const firstEntry = Math.min(...entryTimes);
+  const lastExit = Math.max(...exitTimes);
+  const periodDays = Math.max(0, (lastExit - firstEntry) / 86_400_000);
+
+  // Annualisierung: aufs Jahr hochgerechnet. Bei Totalverlust (Faktor ≤ 0) → -100 %.
+  let annualizedReturn = 0;
+  if (periodDays >= 1) {
+    annualizedReturn =
+      compoundFactor <= 0
+        ? -100
+        : (Math.pow(compoundFactor, 365.25 / periodDays) - 1) * 100;
+  }
 
   return {
     totalTrades: trades.length,
@@ -73,6 +109,11 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
     bestTrade: Math.max(...returns),
     worstTrade: Math.min(...returns),
     totalReturn: returns.reduce((a, b) => a + b, 0),
+    compoundReturn,
+    annualizedReturn,
+    periodDays,
+    firstTradeDate: new Date(firstEntry).toISOString(),
+    lastTradeDate: new Date(lastExit).toISOString(),
     alertTriggeredCount: closed.filter((t) => t.alertTriggered).length,
     earlyExitCount: 0,
   };
