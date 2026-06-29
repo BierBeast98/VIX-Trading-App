@@ -10,6 +10,9 @@ export interface TradeRecord {
   barrierLevel: number;
   returnPct?: number | null;
   holdDays?: number | null;
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  quantity?: number | null;
   alertTriggered: boolean;
 }
 
@@ -38,6 +41,10 @@ export interface PerformanceMetrics {
   firstTradeDate: string | null;
   /** ISO-Datum des letzten Ausstiegs (oder null) */
   lastTradeDate: string | null;
+  /** Realisierter Gewinn/Verlust in € — Σ (exit−entry)×Stück über Trades mit vollständigen Daten */
+  totalPnlEur: number;
+  /** Anzahl Trades mit vollständigen €-Daten (entry, exit, quantity) */
+  tradesWithEurData: number;
   alertTriggeredCount: number;
   earlyExitCount: number;
 }
@@ -65,6 +72,8 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
       periodDays: 0,
       firstTradeDate: null,
       lastTradeDate: null,
+      totalPnlEur: 0,
+      tradesWithEurData: 0,
       alertTriggeredCount: 0,
       earlyExitCount: 0,
     };
@@ -95,6 +104,15 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
         : (Math.pow(compoundFactor, 365.25 / periodDays) - 1) * 100;
   }
 
+  // Realisierter G/V in € — nur Trades mit vollständigen Daten (Einstieg, Ausstieg, Stückzahl)
+  const eurTrades = closed.filter(
+    (t) => t.entryPrice != null && t.exitPrice != null && t.quantity != null
+  );
+  const totalPnlEur = eurTrades.reduce(
+    (a, t) => a + (t.exitPrice! - t.entryPrice!) * t.quantity!,
+    0
+  );
+
   return {
     totalTrades: trades.length,
     closedTrades: closed.length,
@@ -114,6 +132,8 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
     periodDays,
     firstTradeDate: new Date(firstEntry).toISOString(),
     lastTradeDate: new Date(lastExit).toISOString(),
+    totalPnlEur,
+    tradesWithEurData: eurTrades.length,
     alertTriggeredCount: closed.filter((t) => t.alertTriggered).length,
     earlyExitCount: 0,
   };

@@ -231,8 +231,16 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - `app/analytics/page.tsx` — neue Karte „Rendite über die Zeit" (Gesamtrendite kumuliert + Annualisiert aufs Jahr + Ø/Trade, mit Zeitraum-Header). KPI „Gesamtrendite" zeigt jetzt die kumulierte statt der naiven Summe. Annualisierung erst ab ≥2 Trades & ≥14 Tagen aussagekräftig (sonst „—").
 - Verifiziert: Mathe geprüft (z.B. +70,94 % über 4,8 Mon. → +287 % annualisiert), Screenshot bestätigt. API spreadt Metrics unverändert — keine Route-Änderung nötig.
 
+### Session 7 (2026-06-29) — Analytics: €-gewichtete Depot-Rendite
+- **Konzept:** „Aktuelles Kapital" (inkl. realisierter G/V) eingeben → System rechnet zum Startkapital zurück: `Start = Kapital − Σ G/V`, `Rendite = G/V / Start`, annualisiert `(Kapital/Start)^(365,25/Tage)−1`.
+- `lib/analytics.ts` — `TradeRecord` um `entryPrice/exitPrice/quantity` erweitert; `totalPnlEur` (Σ (exit−entry)×Stück) + `tradesWithEurData` in Metrics.
+- `app/api/account-capital/route.ts` (**neu**) — GET/PUT, persistiert Kapital im generischen `VixCache`-KV (id=`account_capital`). **Kein Schema-Feld → keine Migration, kein Deploy-Risiko** (Settings-Spalte hätte `prisma db push` gegen Prod-Neon gebraucht, sonst Crash).
+- `app/analytics/page.tsx` — Kapital-Eingabe (persistiert, cross-device), Karte „Rendite über die Zeit" jetzt €-gewichtet primär (Gesamtrendite + annualisiert + realisierter G/V), gleichgewichtete %-Sicht als Referenzzeile. KPI „Gesamt" zeigt €-gewichtet wenn Kapital gesetzt.
+- Verifiziert (echte 4 Trades): G/V +772 €, Startkapital 2.928 € → **+26,36 %**, annualisiert **+145,88 %** (95 Tage). Desktop + Mobile-Screenshot bestätigt.
+- ⚠ Annahme: setzt sequenzielle Reinvestition in einen Kapitaltopf voraus; Trades ohne `quantity` werden ignoriert (Hinweis in der UI).
+
 ### Offene Punkte / Nächste Schritte
-- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics)
+- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics). Kapital dort einmalig eingeben (wird in Prod-DB persistiert).
 - Optional: Desktop-`handleClosePosition` schließt aktuell nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden
 - Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`)
 

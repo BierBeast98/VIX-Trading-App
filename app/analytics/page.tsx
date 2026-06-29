@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from "recharts";
@@ -31,6 +31,8 @@ interface Metrics {
   periodDays: number;
   firstTradeDate: string | null;
   lastTradeDate: string | null;
+  totalPnlEur: number;
+  tradesWithEurData: number;
   alertTriggeredCount: number;
 }
 
@@ -56,6 +58,27 @@ interface Settings {
 export default function AnalyticsPage() {
   const { data, isLoading: loading } = useSWR<AnalyticsData>("/api/analytics");
   const { data: settings } = useSWR<Settings>("/api/settings");
+  const { data: capitalData } = useSWR<{ currentCapital: number | null }>("/api/account-capital");
+
+  // Aktuell verfügbares Kapital (inkl. realisierter G/V) — Eingabe, persistiert in VixCache
+  const [capitalInput, setCapitalInput] = useState("");
+  const [capitalSaved, setCapitalSaved] = useState(false);
+  useEffect(() => {
+    if (capitalData?.currentCapital != null) setCapitalInput(String(capitalData.currentCapital));
+  }, [capitalData?.currentCapital]);
+
+  const saveCapital = async () => {
+    const val = parseFloat(capitalInput);
+    if (!isFinite(val) || val < 0) return;
+    await fetch("/api/account-capital", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentCapital: val }),
+    });
+    globalMutate("/api/account-capital");
+    setCapitalSaved(true);
+    setTimeout(() => setCapitalSaved(false), 1500);
+  };
 
   // Backtesting state
   const [btDirection, setBtDirection] = useState<"long" | "short">("short");
@@ -118,6 +141,33 @@ export default function AnalyticsPage() {
 
   const m = data?.metrics;
 
+  // Annualisierung erst ab genug Historie aussagekräftig
+  const annualizedReliable = !!m && m.closedTrades >= 2 && m.periodDays >= 14;
+  const fmtDate = (iso: string | null) =>
+    iso ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+  const monthsLabel = m && m.periodDays > 0 ? (m.periodDays / 30.44).toFixed(1) : "0";
+
+  // €-gewichtete Depot-Rendite: aus aktuellem Kapital zum Startkapital zurückrechnen.
+  // Startkapital = aktuelles Kapital − realisierter G/V. Rendite = G/V / Startkapital.
+  const currentCapital = parseFloat(capitalInput);
+  const pnlEur = m?.totalPnlEur ?? 0;
+  const startCapital = isFinite(currentCapital) ? currentCapital - pnlEur : NaN;
+  const capitalValid = !!m && isFinite(currentCapital) && currentCapital > 0 && startCapital > 0;
+  const euroReturnPct = capitalValid ? (pnlEur / startCapital) * 100 : null;
+  const euroAnnualizedPct =
+    capitalValid && m!.periodDays >= 14
+      ? (Math.pow(currentCapital / startCapital, 365.25 / m!.periodDays) - 1) * 100
+      : null;
+  const fmtEur = (n: number) =>
+    `${n >= 0 ? "+" : "−"}${Math.abs(n).toLocaleString("de-DE", { maximumFractionDigits: 0 })} €`;
+  const fmtEurPlain = (n: number) =>
+    n.toLocaleString("de-DE", { maximumFractionDigits: 0 }) + " €";
+
+  // KPI-„Gesamt": €-gewichtet wenn Kapital gesetzt, sonst gleichgewichtet (kumuliert)
+  const totalKpi = euroReturnPct != null
+    ? { label: "Gesamt (€-gew.)", value: formatPct(euroReturnPct), color: euroReturnPct >= 0 ? "#22C55E" : "#FF4D4D" }
+    : { label: "Gesamt (kumuliert)", value: m ? formatPct(m.compoundReturn) : "—", color: (m?.compoundReturn ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" };
+
   const kpis = m ? [
     { label: "Win Rate", value: formatPct(m.winRate * 100, 0), color: m.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" },
     { label: "Ø Rendite", value: formatPct(m.avgReturn), color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" },
@@ -125,15 +175,9 @@ export default function AnalyticsPage() {
     { label: "Sharpe Ratio", value: formatNumber(m.sharpeRatio, 2), color: m.sharpeRatio >= 1 ? "#22C55E" : "#F59E0B" },
     { label: "Bester Trade", value: formatPct(m.bestTrade), color: "#22C55E" },
     { label: "Schlechtester Trade", value: formatPct(m.worstTrade), color: "#FF4D4D" },
-    { label: "Gesamt (kumuliert)", value: formatPct(m.compoundReturn), color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" },
+    totalKpi,
     { label: "Alert-getriggert", value: `${m.alertTriggeredCount}/${m.closedTrades}`, color: "#B8E15A" },
   ] : [];
-
-  // Annualisierung erst ab genug Historie aussagekräftig
-  const annualizedReliable = !!m && m.closedTrades >= 2 && m.periodDays >= 14;
-  const fmtDate = (iso: string | null) =>
-    iso ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-  const monthsLabel = m && m.periodDays > 0 ? (m.periodDays / 30.44).toFixed(1) : "0";
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -155,7 +199,7 @@ export default function AnalyticsPage() {
             ))}
           </div>
 
-          {/* Rendite über die Zeit */}
+          {/* Rendite über die Zeit (€-gewichtet) */}
           {m && m.closedTrades > 0 && (
             <Card>
               <CardHeader>
@@ -164,28 +208,56 @@ export default function AnalyticsPage() {
                   {fmtDate(m.firstTradeDate)} – {fmtDate(m.lastTradeDate)} · {monthsLabel} Mon. · {m.closedTrades} Trades
                 </span>
               </CardHeader>
+
+              {/* Kapital-Eingabe + abgeleitetes Startkapital */}
+              <div className="flex flex-wrap items-end gap-4 mb-4 p-3 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
+                <div className="w-40">
+                  <Input
+                    label="Aktuelles Kapital (€)"
+                    type="number"
+                    step="50"
+                    value={capitalInput}
+                    onChange={(e) => setCapitalInput(e.target.value)}
+                    onBlur={saveCapital}
+                  />
+                </div>
+                <div className="text-xs leading-relaxed" style={{ color: "#8B8FA8" }}>
+                  inkl. realisierter G/V der letzten Trades<br />
+                  {capitalValid ? (
+                    <>
+                      Startkapital: <span className="text-white font-medium">{fmtEurPlain(startCapital)}</span>
+                      {" → "}aktuell <span className="text-white font-medium">{fmtEurPlain(currentCapital)}</span>
+                      {" "}({fmtEur(pnlEur)})
+                    </>
+                  ) : (
+                    <span style={{ color: "#4A4A5A" }}>Kapital eingeben, um die €-gewichtete Rendite zu berechnen</span>
+                  )}
+                </div>
+                {capitalSaved && <span className="text-xs" style={{ color: "#22C55E" }}>✓ gespeichert</span>}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Gesamtrendite kumuliert */}
+                {/* Gesamtrendite €-gewichtet (primär) */}
                 <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Gesamtrendite (kumuliert)</div>
-                  <div className="text-3xl font-bold" style={{ color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                    {formatPct(m.compoundReturn)}
+                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Gesamtrendite (€-gewichtet)</div>
+                  <div className="text-3xl font-bold" style={{ color: euroReturnPct == null ? "#8B8FA8" : euroReturnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {euroReturnPct == null ? "—" : formatPct(euroReturnPct)}
                   </div>
                   <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
-                    Summe der Einzeltrades: {formatPct(m.totalReturn)}
+                    realisierter G/V {fmtEur(pnlEur)}
                   </div>
                 </div>
 
-                {/* Annualisiert */}
+                {/* Annualisiert €-gewichtet */}
                 <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
                   <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Annualisiert (aufs Jahr)</div>
-                  <div className="text-3xl font-bold" style={{ color: !annualizedReliable ? "#8B8FA8" : m.annualizedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                    {annualizedReliable ? formatPct(m.annualizedReturn) : "—"}
+                  <div className="text-3xl font-bold" style={{ color: euroAnnualizedPct == null ? "#8B8FA8" : euroAnnualizedPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {euroAnnualizedPct == null ? "—" : formatPct(euroAnnualizedPct)}
                   </div>
                   <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
-                    {annualizedReliable
+                    {euroAnnualizedPct != null
                       ? `hochgerechnet aus ${monthsLabel} Mon.`
-                      : "zu wenig Historie (min. 2 Trades, 14 Tage)"}
+                      : capitalValid ? "zu wenig Historie (≥14 Tage)" : "Kapital eingeben"}
                   </div>
                 </div>
 
@@ -199,6 +271,21 @@ export default function AnalyticsPage() {
                     Ø Haltedauer {m.avgHoldDays.toFixed(0)}d
                   </div>
                 </div>
+              </div>
+
+              {/* Gleichgewichtete Referenz (prozentual, ohne Positionsgrößen) */}
+              <div className="mt-3 pt-3 text-xs" style={{ borderTop: "1px solid #1E1E28", color: "#4A4A5A" }}>
+                Gleichgewichtet (% je Trade, ohne €-Größen): kumuliert{" "}
+                <span style={{ color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>{formatPct(m.compoundReturn)}</span>
+                {" "}· annualisiert{" "}
+                <span style={{ color: !annualizedReliable ? "#8B8FA8" : m.annualizedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                  {annualizedReliable ? formatPct(m.annualizedReturn) : "—"}
+                </span>
+                {m.tradesWithEurData < m.closedTrades && (
+                  <span style={{ color: "#F59E0B" }}>
+                    {" "}· ⚠ {m.closedTrades - m.tradesWithEurData} Trade(s) ohne €-Daten ignoriert
+                  </span>
+                )}
               </div>
             </Card>
           )}
