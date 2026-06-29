@@ -82,7 +82,14 @@ export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetric
   const returns = closed.map((t) => t.returnPct!);
   const wins = returns.filter((r) => r > 0);
   const losses = returns.filter((r) => r < 0);
-  const holdDays = closed.map((t) => t.holdDays ?? 0).filter((d) => d > 0);
+  // Haltedauer aus den Daten ableiten (gespeichertes holdDays kann null/veraltet sein)
+  const holdDays = closed
+    .map((t) =>
+      t.exitDate
+        ? Math.round((new Date(t.exitDate).getTime() - new Date(t.entryDate).getTime()) / 86_400_000)
+        : 0
+    )
+    .filter((d) => d > 0);
 
   // Kumulierte (verzinste) Gesamtrendite: Kapital läuft sequentiell durch alle Trades
   const compoundFactor = closed.reduce((acc, t) => acc * (1 + t.returnPct! / 100), 1);

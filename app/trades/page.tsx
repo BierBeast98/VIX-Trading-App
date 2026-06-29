@@ -32,6 +32,18 @@ interface Trade {
   notes: string;
 }
 
+/**
+ * Haltedauer in Tagen — immer aus Ein-/Ausstiegsdatum berechnet (Single Source of Truth),
+ * unabhängig vom evtl. null/veralteten gespeicherten holdDays-Wert.
+ * Negativ = Ausstieg liegt vor Einstieg (Dateneingabe-Fehler).
+ */
+function holdDaysFromDates(entryDate: string, exitDate: string | null): number | null {
+  if (!exitDate) return null;
+  const ms = new Date(exitDate).getTime() - new Date(entryDate).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.round(ms / 86_400_000);
+}
+
 const EMPTY_FORM = {
   certificateId: "",
   direction: "short" as "long" | "short",
@@ -226,7 +238,7 @@ export default function TradesPage() {
       t.leverageRatio ?? "",
       t.ratio ?? "",
       t.returnPct ?? "",
-      t.holdDays ?? "",
+      holdDaysFromDates(t.entryDate, t.exitDate) ?? "",
       t.alertTriggered ? "Ja" : "Nein",
       t.notes,
     ]);
@@ -255,7 +267,7 @@ export default function TradesPage() {
         0
       );
       const holdDays = closed.length
-        ? closed.reduce((sum, t) => sum + Math.max(t.holdDays ?? 1, 1), 0) / closed.length
+        ? closed.reduce((sum, t) => sum + Math.max(holdDaysFromDates(t.entryDate, t.exitDate) ?? 1, 1), 0) / closed.length
         : 0;
       const annualized =
         closed.length && holdDays > 0
@@ -614,7 +626,7 @@ export default function TradesPage() {
                       </div>
                       <div>
                         <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Haltetage</span>
-                        <span className="text-sm text-white">{trade.holdDays ?? "—"}</span>
+                        <span className="text-sm text-white">{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</span>
                       </div>
                     </div>
                     {isOpen && liveBid != null && (
@@ -776,7 +788,7 @@ export default function TradesPage() {
                           </span>
                         ) : "—"}
                       </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{trade.holdDays ?? "—"}</td>
+                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</td>
                       <td className="py-3 px-2">
                         {trade.alertTriggered
                           ? <Bell size={13} style={{ color: "#B8E15A" }} />

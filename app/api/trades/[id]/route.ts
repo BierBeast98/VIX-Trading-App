@@ -37,6 +37,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       updateData.returnPct = ((parsed.exitPrice - parsed.entryPrice) / parsed.entryPrice) * 100;
     }
 
+    // Haltedauer immer aus den (ggf. aktualisierten) Daten neu berechnen.
+    // Fehlende Datumsfelder aus dem bestehenden Trade ergänzen.
+    const existing = await prisma.trade.findUnique({ where: { id } });
+    if (existing) {
+      const entry = (updateData.entryDate as Date) ?? existing.entryDate;
+      const exit = (updateData.exitDate as Date | undefined) ?? existing.exitDate;
+      updateData.holdDays = exit
+        ? Math.round((new Date(exit).getTime() - new Date(entry).getTime()) / 86_400_000)
+        : null;
+    }
+
     const trade = await prisma.trade.update({
       where: { id },
       data: updateData,
