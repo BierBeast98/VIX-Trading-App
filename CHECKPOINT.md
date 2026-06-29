@@ -239,6 +239,12 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Verifiziert (echte 4 Trades): G/V +772 €, Startkapital 2.928 € → **+26,36 %**, annualisiert **+145,88 %** (95 Tage). Desktop + Mobile-Screenshot bestätigt.
 - ⚠ Annahme: setzt sequenzielle Reinvestition in einen Kapitaltopf voraus; Trades ohne `quantity` werden ignoriert (Hinweis in der UI).
 
+### Dev-Hinweis: Vorschau flackert / „Next.js package not found" (Turbopack-Panic)
+- **Symptom:** Lokale Vorschau (`npm run dev`) flackert auf einer Seite (z.B. `/trades`) zwischen Skeleton und Inhalt, lädt in Endlosschleife. Server-Log zeigt `FATAL: Turbopack ... Failed to write app endpoint` / `Next.js package not found`.
+- **Ursache:** Korrupter inkrementeller `.next`-Cache (tritt nach vielen schnellen Edits + Server-Neustarts auf). **Kein Code-Bug, betrifft NICHT die Live-Seite** (Hostinger = vorgebaut).
+- **Fix:** `rm -rf .next` und Dev-Server neu starten. Danach lädt die Seite stabil.
+- **Nicht** auf `next dev --webpack` ausweichen: Webpack bricht den Neon-WS-Treiber (`bufferUtil.mask is not a function` → DB-Verbindung tot, 0 Trades). Bei Turbopack bleiben.
+
 ### Offene Punkte / Nächste Schritte
 - Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics). Kapital dort einmalig eingeben (wird in Prod-DB persistiert).
 - Optional: Desktop-`handleClosePosition` schließt aktuell nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden
