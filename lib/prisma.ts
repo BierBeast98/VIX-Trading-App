@@ -27,12 +27,21 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient() {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
+  const url = process.env.DATABASE_URL ?? "";
+  const log: ("error")[] =
+    process.env.NODE_ENV === "development" ? ["error"] : [];
+
+  // Lokale Entwicklung gegen ein normales PostgreSQL: der Neon-Serverless-Treiber
+  // spricht WebSocket und kann sich nicht mit lokalem Postgres verbinden. Nur wenn
+  // die DATABASE_URL auf Neon zeigt, den Neon-Adapter verwenden (= Produktion).
+  const isNeon = url.includes("neon.tech");
+  if (!isNeon) {
+    return new PrismaClient({ log });
+  }
+
+  const pool = new Pool({ connectionString: url });
   const adapter = new PrismaNeon(pool);
-  return new PrismaClient({
-    adapter,
-    log: process.env.NODE_ENV === "development" ? ["error"] : [],
-  });
+  return new PrismaClient({ adapter, log });
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

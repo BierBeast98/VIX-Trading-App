@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { TrendingUp, TrendingDown, RefreshCw, Activity, Bell as BellIcon } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Activity, Bell as BellIcon, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -135,6 +135,7 @@ interface VontobelPrice {
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>("1d");
   const [refreshing, setRefreshing] = useState(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
@@ -221,6 +222,28 @@ export default function DashboardPage() {
       { revalidate: true }
     );
     setRefreshing(false);
+  };
+
+  const handleClosePosition = async (pos: Position) => {
+    const ok = window.confirm(
+      `Position ${pos.certificateId} (${pos.direction.toUpperCase()}) wirklich schließen?\n\nSie verschwindet dann aus den offenen Positionen und dem iPhone-Widget.`
+    );
+    if (!ok) return;
+    setClosingId(pos.id);
+    try {
+      const res = await fetch(`/api/positions/${pos.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Schließen fehlgeschlagen");
+      await globalMutate(
+        (key: unknown) => typeof key === "string" && key.startsWith("/api/positions"),
+        undefined,
+        { revalidate: true }
+      );
+    } catch (err) {
+      console.error(err);
+      window.alert("Position konnte nicht geschlossen werden. Bitte erneut versuchen.");
+    } finally {
+      setClosingId(null);
+    }
   };
 
   const handlePeriodChange = (p: Period) => {
@@ -804,9 +827,21 @@ export default function DashboardPage() {
                             Barrier: {formatNumber(pos.currentBarrier)} | Hebel: {formatNumber(pos.leverageRatio, 1)}x
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-sm" style={{ color: "#8B8FA8" }}>VIX-Einstieg: {formatNumber(pos.entryVix)}</div>
-                          {barrierDist !== null && <div className="text-xs" style={{ color: "#8B8FA8" }}>Dist: {formatNumber(barrierDist, 1)}%</div>}
+                        <div className="flex items-start gap-2">
+                          <div className="text-right">
+                            <div className="text-sm" style={{ color: "#8B8FA8" }}>VIX-Einstieg: {formatNumber(pos.entryVix)}</div>
+                            {barrierDist !== null && <div className="text-xs" style={{ color: "#8B8FA8" }}>Dist: {formatNumber(barrierDist, 1)}%</div>}
+                          </div>
+                          <button
+                            onClick={() => handleClosePosition(pos)}
+                            disabled={closingId === pos.id}
+                            title="Position schließen"
+                            aria-label="Position schließen"
+                            className="p-1 rounded-md transition-colors hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            style={{ color: "#8B8FA8" }}
+                          >
+                            <X size={14} />
+                          </button>
                         </div>
                       </div>
                       {bid != null && (
