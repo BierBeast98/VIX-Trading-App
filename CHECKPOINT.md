@@ -218,8 +218,17 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - `components/layout/sidebar.tsx` — fixe Mobile-Kopfleiste respektiert `safe-area-inset-top` (Notch / Standalone-Modus).
 - Verifiziert via Preview: mobil = Dokument-Scroll (`overflow: visible`), Desktop ≥1024px = innerer Scroll unverändert, keine Konsolenfehler.
 
+### Session 5 (2026-06-29) — Position auf iPhone schließbar
+**Problem:** Offene Position ließ sich auf dem iPhone nicht löschen/schließen (blieb im Widget).
+**Ursache:** Die mobile Dashboard-Karte (`lg:hidden`, basiert auf `openTrades`) hatte **keinen** Schließen-Button — der existierte nur im Desktop-Block (`hidden lg:block`).
+
+- `app/dashboard/page.tsx` — neuer `handleCloseTrade(trade, liveBid)` + „Schließen"-Button im Footer der mobilen Positionskarte. Schließt über `PUT /api/trades/:id` (setzt `exitDate`), wodurch die Server-Logik die verknüpfte Position auf `status: "closed"` setzt → verschwindet aus offenen Positionen, Dashboard **und iPhone-Widget**; bleibt als abgeschlossener Trade in der Historie. `entryPrice` + Live-Bid werden mitgeschickt, damit `returnPct` berechnet wird (Analytics/Backtest).
+- Verifiziert via Preview: Button sichtbar (mobil), Klick-Flow getestet (Position weg aus `/api/positions` + `/api/trades`), Screenshot bestätigt.
+- Hinweis: Dev-Server hatte einen Turbopack-Panic auf `/trades/page` (interner Next-Bug, kein Code-Fehler) → Neustart half.
+
 ### Offene Punkte / Nächste Schritte
-- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten
+- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen)
+- Optional: Desktop-`handleClosePosition` schließt aktuell nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden
 - Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`)
 
 ---

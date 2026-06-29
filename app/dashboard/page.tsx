@@ -246,6 +246,43 @@ export default function DashboardPage() {
     }
   };
 
+  // Mobile-Karte basiert auf Trades — Schließen über die Trade-PUT-Route, die
+  // serverseitig auch die verknüpfte Position auf "closed" setzt (→ raus aus
+  // offenen Positionen + iPhone-Widget). Bleibt als abgeschlossener Trade in der Historie.
+  const handleCloseTrade = async (trade: Trade, liveBid: number | null) => {
+    const ok = window.confirm(
+      `Position ${trade.certificateId} (${trade.direction.toUpperCase()}) schließen?\n\nSie verschwindet aus den offenen Positionen und dem iPhone-Widget und wandert in die Trade-Historie.`
+    );
+    if (!ok) return;
+    setClosingId(trade.id);
+    try {
+      const res = await fetch(`/api/trades/${trade.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          exitDate: new Date().toISOString(),
+          // entryPrice mitschicken, damit der Server returnPct berechnet (für Analytics/Backtest)
+          ...(trade.entryPrice != null ? { entryPrice: trade.entryPrice } : {}),
+          ...(liveBid != null ? { exitPrice: liveBid } : {}),
+        }),
+      });
+      if (!res.ok) throw new Error("Schließen fehlgeschlagen");
+      await globalMutate(
+        (key: unknown) =>
+          (typeof key === "string" &&
+            (key.startsWith("/api/trades") || key.startsWith("/api/positions"))) ||
+          (Array.isArray(key) && key[0] === "vontobel-batch"),
+        undefined,
+        { revalidate: true }
+      );
+    } catch (err) {
+      console.error(err);
+      window.alert("Position konnte nicht geschlossen werden. Bitte erneut versuchen.");
+    } finally {
+      setClosingId(null);
+    }
+  };
+
   const handlePeriodChange = (p: Period) => {
     setPeriod(p);
   };
@@ -584,8 +621,20 @@ export default function DashboardPage() {
                     <span className="text-[10px]" style={{ color: "#8B8FA8" }}>
                       {new Date(trade.entryDate).toLocaleDateString("de-DE")} · {trade.quantity} Stück · VIX {formatNumber(trade.entryVix)}
                     </span>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#B8E15A" }}>
-                      <BellIcon size={14} className="text-black" />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleCloseTrade(trade, liveBid)}
+                        disabled={closingId === trade.id}
+                        aria-label="Position schließen"
+                        className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40"
+                        style={{ background: "#1E1E28", color: "#FF4D4D" }}
+                      >
+                        <X size={13} />
+                        {closingId === trade.id ? "Schließt…" : "Schließen"}
+                      </button>
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#B8E15A" }}>
+                        <BellIcon size={14} className="text-black" />
+                      </div>
                     </div>
                   </div>
                 </div>
