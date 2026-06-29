@@ -166,7 +166,7 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 
 ---
 
-## Zuletzt durchgeführte Änderungen (2026-03-25)
+## Zuletzt durchgeführte Änderungen (2026-03-28)
 
 ### Session 1 (früher)
 - `app/api/widget/route.ts` — Widget-Endpoint deployed: VIX, VX (Futures), ES=F (S&P500) + offene Positionen mit P&L, CORS-Headers, eigener 5-Min-Cache
@@ -198,10 +198,30 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 }
 ```
 
+### Session 3 (2026-03-28)
+- `app/api/widget/route.ts` — Live-Bid-Preis für Zertifikat-Positionen via `getVontobelCertificatePrice()`, Fallback auf DB-Preis
+- `lib/yahoo-finance.ts` — neue Funktion `getVontobelCertificatePrice(isin)` (Vontobel Chart-API)
+- `app/api/alerts/check/route.ts` — VIX-Spot-Spike-Check (Yahoo Finance, zuverlässig), 30-Min-Cooldown per Alert-Typ via AlertLog, VX-Spike losgelöst von Positionen, Response zeigt `alertsTriggered` vs `alertsSent`
+- `lib/alert-engine.ts` — `checkVixSpike` feuert jetzt auch ohne offene Positionen
+- `lib/analytics.ts` — Short-Backtest-Modus, Knockout-Barrier-Parameter, `Math.abs(leverage)` Guard, neue Felder `direction` + `knockoutExits` im Result
+- `app/analytics/page.tsx` — Direction-Toggle (Short/Long), KO-Barrier-Input, Knockout in Ausstiegsgründen (orange)
+- `components/ui/modal.tsx` — `pb-20 lg:pb-4` damit Speichern-Button auf Mobile über der Nav-Bar bleibt
+- `components/charts/VixHistoryChart.tsx` — `dataKey="date"` statt `label` → Tooltip-Cursor folgt Maus korrekt
+- `Untitled Script.js` — `w.url = BASE_URL + "/dashboard"` → Tipp auf Widget öffnet Website
+
+### Session 4 (2026-06-29) — Mobile-Performance & Scrolling
+**Problem:** Scrollen auf dem iPhone funktionierte sporadisch nicht.
+**Ursache:** Verschachtelter Scroll-Container — äußeres `h-screen overflow-hidden` + inneres `<main overflow-y-auto>`. Auf iOS Safari bleibt Momentum-Scrolling auf inneren Containern hängen und die Adressleiste fährt nie ein. Zusätzlich war kein `viewport`-Export gesetzt → `env(safe-area-inset-*)` lieferte auf dem iPhone immer 0 (Safe-Area-Paddings der Tab-Bar wirkungslos).
+
+- `app/layout.tsx` — **Kern-Fix:** Mobil scrollt jetzt das Dokument selbst; innerer Scroll-Container nur noch auf Desktop (`lg:overflow-y-auto`, `lg:h-screen lg:overflow-hidden`). `h-screen` → `min-h-[100dvh]`. Neuer `viewport`-Export mit `viewportFit: "cover"` (+ themeColor). Main-Paddings respektieren `safe-area-inset-top/bottom`.
+- `app/globals.css` — iOS-Scroll-Hygiene: `overscroll-behavior-y: none`, `-webkit-tap-highlight-color: transparent`, `-webkit-text-size-adjust: 100%`.
+- `components/layout/sidebar.tsx` — fixe Mobile-Kopfleiste respektiert `safe-area-inset-top` (Notch / Standalone-Modus).
+- Verifiziert via Preview: mobil = Dokument-Scroll (`overflow: visible`), Desktop ≥1024px = innerer Scroll unverändert, keine Konsolenfehler.
+
 ### Offene Punkte / Nächste Schritte
-- `currentPrice` der Position wird nicht automatisch aktualisiert (zeigt noch Einstiegspreis 0.8000) → Cron-Job oder manueller Update nötig
+- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten
 - Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`)
 
 ---
 
-*Zuletzt aktualisiert: 2026-03-25*
+*Zuletzt aktualisiert: 2026-06-29*

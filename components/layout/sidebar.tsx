@@ -127,8 +127,12 @@ export function Sidebar() {
     <>
       {/* Mobile header bar */}
       <div
-        className="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 py-3 border-b lg:hidden"
-        style={{ background: "#0C0C0F", borderColor: "#1E1E28" }}
+        className="fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 pb-3 border-b lg:hidden"
+        style={{
+          background: "#0C0C0F",
+          borderColor: "#1E1E28",
+          paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)",
+        }}
       >
         <button
           onClick={() => setMobileOpen(true)}

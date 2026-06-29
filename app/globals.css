@@ -27,6 +27,7 @@
 
 html {
   background: #0C0C0F;
+  -webkit-text-size-adjust: 100%; /* iOS skaliert Text nicht beim Drehen */
 }
 
 body {
@@ -34,6 +35,8 @@ body {
   color: #FFFFFF;
   font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent; /* kein grauer Tap-Blitz auf iOS */
+  overscroll-behavior-y: none;               /* kein Scroll-Chaining / Pull-to-Refresh-Hänger */
 }
 
 /* Scrollbar styling */
