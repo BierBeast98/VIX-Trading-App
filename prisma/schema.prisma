@@ -76,6 +76,7 @@ model Trade {
 
   @@index([entryDate])
   @@index([exitDate])
+  @@index([positionId])
 }
 
 model AlertLog {
