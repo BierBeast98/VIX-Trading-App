@@ -239,17 +239,29 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Verifiziert (echte 4 Trades): G/V +772 €, Startkapital 2.928 € → **+26,36 %**, annualisiert **+145,88 %** (95 Tage). Desktop + Mobile-Screenshot bestätigt.
 - ⚠ Annahme: setzt sequenzielle Reinvestition in einen Kapitaltopf voraus; Trades ohne `quantity` werden ignoriert (Hinweis in der UI).
 
-### Dev-Hinweis: Vorschau flackert / „Next.js package not found" (Turbopack-Panic)
-- **Symptom:** Lokale Vorschau (`npm run dev`) flackert auf einer Seite (z.B. `/trades`) zwischen Skeleton und Inhalt, lädt in Endlosschleife. Server-Log zeigt `FATAL: Turbopack ... Failed to write app endpoint` / `Next.js package not found`.
-- **Ursache:** Korrupter inkrementeller `.next`-Cache (tritt nach vielen schnellen Edits + Server-Neustarts auf). **Kein Code-Bug, betrifft NICHT die Live-Seite** (Hostinger = vorgebaut).
-- **Fix:** `rm -rf .next` und Dev-Server neu starten. Danach lädt die Seite stabil.
-- **Nicht** auf `next dev --webpack` ausweichen: Webpack bricht den Neon-WS-Treiber (`bufferUtil.mask is not a function` → DB-Verbindung tot, 0 Trades). Bei Turbopack bleiben.
+### Session 8 (2026-07-01) — Trades: Haltedauer korrekt
+**Problem:** Haltedauer auf der Trades-Seite falsch (meist „—", Ø fiel auf 1 zurück).
+**Ursache:** Bestehende Trades hatten `holdDays = null` (anders eingespielt); PUT berechnete es beim Bearbeiten nicht neu.
+- `app/trades/page.tsx` — Helper `holdDaysFromDates(entry, exit)`; Haltedauer wird überall (Tabelle, Mobile-Karte, CSV, Ø Haltetage, annualisiert) **aus den Datumsfeldern** berechnet statt aus dem gespeicherten Wert.
+- `app/api/trades/[id]/route.ts` — PUT berechnet `holdDays` beim Bearbeiten aus den (ggf. neuen) Daten neu.
+- `lib/analytics.ts` — `avgHoldDays` ebenfalls aus Daten abgeleitet.
+- Verifiziert (echte Trades): 10/7/3 Tage korrekt, Ø 5. **DATENFEHLER gefunden:** Trade `DE000VU4MAY5` hat Ein 23.03. / Aus 09.03. (Ausstieg vor Einstieg → −14 Tage). Nutzer hat Korrektur-Entscheid vertagt → unverändert gelassen.
+
+### Dev-Hinweis: Vorschau flackert / 500 (Turbopack + iCloud)
+- **Symptom:** Lokale Vorschau (`npm run dev`) flackert/lädt in Endlosschleife oder liefert 500. Logs: `FATAL: Turbopack ... Failed to write app endpoint` / `Next.js package not found` **oder** `ENOENT: ... .next/dev/server/.../*-manifest.json`.
+- **Ursache:** Das Projekt liegt in **iCloud Drive** (`~/Library/Mobile Documents/…~com~readdle~CommonDocuments`). iCloud synchronisiert/verschiebt `.next`-Build-Artefakte → Next findet sie zeitweise nicht. Auch die `.next 2`-Duplikate stammen daher. **Kein Code-Bug, Live-Seite (Hostinger) nicht betroffen.**
+- **Schnell-Fix:** `rm -rf .next && rm -rf ".next 2"`, Dev-Server neu starten.
+- **Was NICHT funktioniert:** `next dev --webpack` (bricht Neon-WS-Treiber: `bufferUtil.mask is not a function` → DB tot, 0 Trades). `.next` per Symlink aus iCloud auslagern (bricht Turbopack-Modulauflösung: `@tailwindcss/postcss` nicht gefunden + SST-Cache-Schreibfehler).
+- **Dauerhafter Fix (offen, Nutzer-Entscheid):** Projekt aus dem iCloud-Ordner in einen lokalen Pfad verschieben.
+- ⚠ **Wichtig:** `DATABASE_URL` zeigt auf **Neon = PRODUKTION**. Der lokale Dev-Server liest/schreibt echte Daten (kein separates Dev-DB aktiv, da `.env` auf Neon zeigt).
 
 ### Offene Punkte / Nächste Schritte
-- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics). Kapital dort einmalig eingeben (wird in Prod-DB persistiert).
-- Optional: Desktop-`handleClosePosition` schließt aktuell nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden
-- Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`)
+- **6 Commits ungepusht** (Scrolling, Position schließen, 2× Analytics-Rendite, Dev-Doc, Haltedauer). Push auf `main` = Auto-Deploy Hostinger.
+- **Datenentscheid offen:** Trade `DE000VU4MAY5` — Ein-/Ausstiegsdatum vertauscht (−14 Tage). Auf Wunsch tauschen (→ 14 Tage) oder korrekte Daten setzen.
+- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics + Haltedauer). Kapital dort einmalig eingeben (persistiert in Prod-DB).
+- Optional: Desktop-`handleClosePosition` schließt nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden.
+- Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`).
 
 ---
 
-*Zuletzt aktualisiert: 2026-06-29*
+*Zuletzt aktualisiert: 2026-07-01*

@@ -16,6 +16,9 @@
 # next.js
 /.next/
 /out/
+# iCloud-Konflikt-Duplikate (Projekt liegt in iCloud Drive)
+/.next */
+*.icloud
 
 # production
 /build
