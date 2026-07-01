@@ -255,13 +255,39 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - **Dauerhafter Fix (offen, Nutzer-Entscheid):** Projekt aus dem iCloud-Ordner in einen lokalen Pfad verschieben.
 - ⚠ **Wichtig:** `DATABASE_URL` zeigt auf **Neon = PRODUKTION**. Der lokale Dev-Server liest/schreibt echte Daten (kein separates Dev-DB aktiv, da `.env` auf Neon zeigt).
 
+### Session 9 (2026-07-01) — Gesamt-Audit: Performance + Preis-Korrektheit
+**Anlass:** Nutzer wollte App komplett geprüft (funktioniert alles? Live-Preise?) und Performance verbessert haben (Scrollen, Seitenwechsel auf iPhone).
+
+**Health-Check (live):** Alle Endpoints HTTP 200, VIX/VIX3M/Vontobel-Future/EUR-USD plausibel, Caching greift (Spot kalt ~3 s, warm ~0,1 s). Kein toter `/positions`-Link (Nav „Positionen" → `/trades`).
+
+**Frontend-Performance (Commit `f9d947e`):**
+- Alle Charts (`VixIntradayChart`, `CertificateIntradayChart`, `VixHistoryChart`, `CorrelationChart`) in `React.memo`, Datenpipelines in `useMemo`, `Intl.DateTimeFormat` als Modul-Konstante. **Hauptursache des Ruckelns:** jeder SWR-Tick re-renderte alle Charts inkl. CET-Konvertierung pro Datenpunkt.
+- `isAnimationActive={false}` auf allen Recharts-Serien.
+- Recharts (~200 KB) per `next/dynamic` (ssr:false, Platzhalter mit fixer Höhe) aus den Bundles von Dashboard + Analytics; Inline-BarChart → `components/charts/EntryBucketChart.tsx` (neu).
+- Trades-Seite: `TradeCardMobile` + `TradeRowDesktop` als memoized Komponenten mit `useCallback`-Callbacks — Expand re-rendert nur noch die betroffene Card.
+
+**Preis-Korrektheit (Commit `820d91e`):**
+- `Position.currentPrice` wird jetzt bei jedem erfolgreichen Vontobel-Abruf gepflegt (Widget + Batch-Route) → Fallback bei Vontobel-Ausfall ist „letzter bekannter Preis" statt Einstiegspreis. Neues Feld `priceStale` in der Widget-Response; Scriptable-Script zeigt stale Preise mit `~` und grauer P&L.
+- `/api/vix/spot` liefert `futureChangePct` + `futureSource` — Dashboard und iOS-Widget berechnen die VX-Änderung nicht mehr getrennt (waren inkonsistent). VIX3M-Badge im Dashboard wenn Vontobel-Fallback aktiv.
+- `DELETE /api/positions/[id]` schließt verknüpfte offene Trades atomar mit (`$transaction`, exitDate/holdDays/exitPrice aus gecachtem Bid) → Desktop-Schließen == Mobile-Pfad. **Damit ist der alte offene Punkt „Desktop-handleClosePosition-Inkonsistenz" erledigt.**
+- Verschluckte `.catch(() => {})` loggen jetzt; `getVontobelCertificatePrice` validiert Bid (>0, finite) und loggt.
+- `trading-hours.ts`: Wochenend-Check ergänzt (vorher pollte die App auch Sa/So), parseInt-Radix.
+
+**API/DB (Commits `9e346c5`, `275bbb7`):**
+- Alert-Cron: externe Calls + DB-Reads per `Promise.all` parallel; die zwei N+1-Runden (`vixCache.findUnique` pro Position für Spike + Trailing Stop) durch EIN `findMany` + Map ersetzt; Cooldown-Check gebatcht (1 Query statt 1/Alert). Erwartung ~−45 % Cron-Laufzeit.
+- `@@index([positionId])` auf `Trade` — per `prisma db push` bereits in Neon angelegt, dann committet.
+- `GET /api/trades` bewusst ohne Cache-Header (Kommentar im Code).
+
+**Verifiziert:** `npm run build` grün nach jeder Phase; lokale Preview: Dashboard/Trades/Analytics rendern fehlerfrei (0 Konsolenfehler), Card-Expand + Charts funktionieren, VX +1,00 % identisch Widget/Dashboard. Alle 4 Commits gepusht → Auto-Deploy.
+
+**Bewusst NICHT gemacht (Overkill für Single-User):** Listen-Virtualisierung, Redis, RSC/SSR-Umbau, Recharts-Ersatz, WebSockets. In-Memory-Cache (`lib/server-cache.ts`) ist prozesslokal — ok für Single-Instance Hostinger.
+
 ### Offene Punkte / Nächste Schritte
-- **6 Commits ungepusht** (Scrolling, Position schließen, 2× Analytics-Rendite, Dev-Doc, Haltedauer). Push auf `main` = Auto-Deploy Hostinger.
+- **Auf echtem iPhone gegentesten** (https://vix-trading.de): Scroll-Gefühl + Seitenwechsel nach den Perf-Fixes, Position schließen, Widget (inkl. `~`-Stale-Anzeige falls Vontobel mal ausfällt).
 - **Datenentscheid offen:** Trade `DE000VU4MAY5` — Ein-/Ausstiegsdatum vertauscht (−14 Tage). Auf Wunsch tauschen (→ 14 Tage) oder korrekte Daten setzen.
-- Auf echtem iPhone unter https://vix-trading.de nach Deploy gegentesten (Scrolling + Position schließen + Analytics + Haltedauer). Kapital dort einmalig eingeben (persistiert in Prod-DB).
-- Optional: Desktop-`handleClosePosition` schließt nur die Position, nicht den verknüpften offenen Trade (latente Inkonsistenz) — könnte analog auf Trade-PUT umgestellt werden.
-- Widget-Dateiname `Untitled Script.js` könnte umbenannt werden (z.B. `VIX Dashboard.js`).
+- `/api/vontobel/intraday?isin=DE000VJ4MNF2` lieferte nach Handelsschluss `[]` — während Handelszeiten (08–22 CET) gegenprüfen; echte Fehler wären jetzt in den Hostinger-Logs sichtbar (neues Logging).
+- Optional: Widget-Dateiname `Untitled Script.js` umbenennen (z.B. `VIX Dashboard.js`).
 
 ---
 
-*Zuletzt aktualisiert: 2026-07-01*
+*Zuletzt aktualisiert: 2026-07-01 (Session 9)*
