@@ -10,15 +10,19 @@
  */
 export function isWithinTradingHours(): boolean {
   const now = new Date();
-  const parts = new Intl.DateTimeFormat("de-DE", {
+  const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Europe/Berlin",
+    weekday: "short",
     hour: "numeric",
     minute: "numeric",
     hour12: false,
   }).formatToParts(now);
 
-  const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0");
-  const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  if (weekday === "Sat" || weekday === "Sun") return false;
+
+  const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
   const totalMinutes = h * 60 + m;
 
   return totalMinutes >= 7 * 60 && totalMinutes <= 22 * 60 + 30;

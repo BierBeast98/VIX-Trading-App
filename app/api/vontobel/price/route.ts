@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
       where: { id: cacheKey },
       update: { data: data as any },
       create: { id: cacheKey, data: data as any },
-    }).catch(() => {});
+    }).catch((e) => console.error("[vontobel/price] cache upsert:", e));
 
     return NextResponse.json(data, { headers: CC });
   } catch (err) {

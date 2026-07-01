@@ -78,7 +78,14 @@ export async function GET() {
       }
       const bid = await withTimeout(getVontobelCertificatePrice(p.certificateId), 8000);
       livePrices[p.certificateId] = bid;
-      if (bid != null) memSet(cacheKey, bid, CERT_PRICE_TTL);
+      if (bid != null) {
+        memSet(cacheKey, bid, CERT_PRICE_TTL);
+        // Letzten bekannten Preis an der Position pflegen — dient als Fallback,
+        // wenn Vontobel später nicht erreichbar ist (statt ewig alter Einstiegspreis)
+        prisma.position
+          .updateMany({ where: { certificateId: p.certificateId, status: "open" }, data: { currentPrice: bid } })
+          .catch((e) => console.error(`[widget] currentPrice update ${p.certificateId}:`, e));
+      }
     })
   );
 
@@ -107,8 +114,12 @@ export async function GET() {
   ];
 
   const openPositions = positions.map((p) => {
-    const livePrice = p.certificateId ? livePrices[p.certificateId] : null;
-    const currentPrice = livePrice ?? p.currentPrice;
+    const livePrice = p.certificateId ? (livePrices[p.certificateId] ?? null) : null;
+    // Fallback = letzter bekannter Preis (wird oben bei jedem Live-Abruf gepflegt);
+    // priceStale signalisiert dem Widget, dass der Wert nicht live ist
+    const fallbackPrice = p.currentPrice > 0 ? p.currentPrice : p.entryPrice;
+    const currentPrice = livePrice ?? fallbackPrice;
+    const priceStale = livePrice == null;
     const rawPnl =
       p.entryPrice > 0
         ? p.direction === "short"
@@ -121,6 +132,7 @@ export async function GET() {
       entryPrice: parseFloat(p.entryPrice.toFixed(4)),
       currentPrice: parseFloat(currentPrice.toFixed(4)),
       pnlPct,
+      priceStale,
       direction: p.direction,
     };
   });

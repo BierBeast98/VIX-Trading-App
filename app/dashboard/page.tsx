@@ -56,6 +56,8 @@ interface VixData {
     name: string;
     timestamp: string;
   } | null;
+  futureChangePct?: number | null;
+  futureSource?: "vontobel" | "yahoo-vix3m" | null;
   spread: number | null;
   zScore: string;
   rollingMean: string;
@@ -332,10 +334,14 @@ export default function DashboardPage() {
     );
   }
 
+  // Server liefert Preis + Änderung aus derselben Quelle (vontobel | yahoo-vix3m) —
+  // identisch mit dem iOS-Widget; lokale Neuberechnung nur als Fallback für alte Cache-Payloads
   const futurePrice = vFuture ? vFuture.price : futures ? futures.price : null;
-  const futureChangePct = vFuture
-    ? (vFuture.previousClose ? ((vFuture.price - vFuture.previousClose) / vFuture.previousClose) * 100 : 0)
-    : (futures?.changePct ?? 0);
+  const futureChangePct =
+    vixData?.futureChangePct ??
+    (vFuture
+      ? (vFuture.previousClose ? ((vFuture.price - vFuture.previousClose) / vFuture.previousClose) * 100 : 0)
+      : (futures?.changePct ?? 0));
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -456,6 +462,7 @@ export default function DashboardPage() {
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8B8FA8" }}>VIX Future</span>
               {vFuture && <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "rgba(184,225,90,0.15)", color: "#B8E15A" }}>Vontobel</span>}
+              {!vFuture && futures && <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "rgba(139,143,168,0.15)", color: "#8B8FA8" }}>VIX3M</span>}
             </div>
             <div className="text-2xl font-bold text-white">
               {futurePrice ? formatNumber(futurePrice) : "—"}
@@ -721,6 +728,7 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle>VIX Future</CardTitle>
               {vFuture && <Badge variant="accent">Vontobel</Badge>}
+              {!vFuture && futures && <Badge variant="muted">VIX3M</Badge>}
             </CardHeader>
             <div className="text-3xl font-bold text-white mb-2">
               {futurePrice ? formatNumber(futurePrice) : "—"}

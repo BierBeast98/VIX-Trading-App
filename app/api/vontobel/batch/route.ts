@@ -48,16 +48,21 @@ async function getPrice(isin: string): Promise<object> {
       `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0/0?c=de-de`,
       { headers: FETCH_HEADERS, next: { revalidate: 0 } }
     );
-    if (!resp.ok) return { isin, bid: null, underlying: null, timestamp: null };
+    if (!resp.ok) {
+      console.error(`[vontobel/batch] ${isin}: HTTP ${resp.status}`);
+      return { isin, bid: null, underlying: null, timestamp: null };
+    }
 
     const json = await resp.json();
     const series: any[] = json?.payload?.series ?? [];
     const productSeries = series.find((s) => s.isProduct === true);
     const underlyingSeries = series.find((s) => s.isProduct === false);
 
+    const rawBid = productSeries?.points?.[0]?.bid;
+    const bid = typeof rawBid === "number" && Number.isFinite(rawBid) && rawBid > 0 ? rawBid : null;
     const data = {
       isin,
-      bid: productSeries?.points?.[0]?.bid ?? null,
+      bid,
       underlying: underlyingSeries?.points?.[0]?.close ?? null,
       timestamp: productSeries?.points?.[0]?.timestamp ?? null,
     };
@@ -65,10 +70,19 @@ async function getPrice(isin: string): Promise<object> {
     memSet(key, data, PRICE_TTL);
     prisma.vixCache
       .upsert({ where: { id: key }, update: { data: data as any }, create: { id: key, data: data as any } })
-      .catch(() => {});
+      .catch((e) => console.error(`[vontobel/batch] cache upsert ${isin}:`, e));
+
+    // Letzten bekannten Preis an der Position pflegen — dient als Fallback,
+    // wenn Vontobel später nicht erreichbar ist (statt ewig alter Einstiegspreis)
+    if (bid != null) {
+      prisma.position
+        .updateMany({ where: { certificateId: isin, status: "open" }, data: { currentPrice: bid } })
+        .catch((e) => console.error(`[vontobel/batch] currentPrice update ${isin}:`, e));
+    }
 
     return data;
-  } catch {
+  } catch (err) {
+    console.error(`[vontobel/batch] ${isin}:`, err);
     return { isin, bid: null, underlying: null, timestamp: null };
   }
 }

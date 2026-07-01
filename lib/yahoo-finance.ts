@@ -330,12 +330,17 @@ export async function getVontobelCertificatePrice(
         signal: AbortSignal.timeout(8_000),
       }
     );
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.error(`[vontobel cert price] ${isin}: HTTP ${resp.status}`);
+      return null;
+    }
     const json = await resp.json();
     const series: any[] = json?.payload?.series ?? [];
     const productSeries = series.find((s: any) => s.isProduct === true);
-    return productSeries?.points?.[0]?.bid ?? null;
-  } catch {
+    const bid = productSeries?.points?.[0]?.bid;
+    return typeof bid === "number" && Number.isFinite(bid) && bid > 0 ? bid : null;
+  } catch (err) {
+    console.error(`[vontobel cert price] ${isin}:`, err);
     return null;
   }
 }

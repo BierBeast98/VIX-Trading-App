@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
       ]);
 
       // Persist new data points to DB (non-blocking)
-      saveIntradayData("VIX", freshVix).catch(() => {});
-      saveIntradayData("FUTURES", freshFutures).catch(() => {});
+      saveIntradayData("VIX", freshVix).catch((e) => console.error("[historical] saveIntradayData VIX:", e));
+      saveIntradayData("FUTURES", freshFutures).catch((e) => console.error("[historical] saveIntradayData FUTURES:", e));
 
       // Load stored data for last 3 days (covers weekends) and merge with fresh
       const from = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
         update: { data: data as any },
         create: { id: cacheKey, data: data as any },
       }),
-    ]).catch(() => {});
+    ]).catch((e) => console.error("[historical] cache upsert:", e));
 
     return NextResponse.json(data, { headers: histCC });
   } catch (err) {

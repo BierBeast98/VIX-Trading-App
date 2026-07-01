@@ -78,10 +78,24 @@ export async function GET() {
 
     // Use Vontobel VIX Future as primary, fall back to Yahoo ^VIX3M
     const futurePrice = vontobelQuote?.price ?? futures?.price ?? null;
+    // Single Source of Truth für die VX-Änderung: Server berechnet aus derselben
+    // Quelle wie den Preis — Dashboard und iOS-Widget zeigen damit identische Werte
+    const futureSource: "vontobel" | "yahoo-vix3m" | null = vontobelQuote
+      ? "vontobel"
+      : futures
+        ? "yahoo-vix3m"
+        : null;
+    const futurePrevClose = vontobelQuote?.previousClose ?? futures?.previousClose ?? null;
+    const futureChangePct =
+      futurePrice != null && futurePrevClose != null && futurePrevClose > 0
+        ? ((futurePrice - futurePrevClose) / futurePrevClose) * 100
+        : null;
     const data = {
       spot,
       futures,
       vontobelFuture: vontobelQuote,
+      futureChangePct,
+      futureSource,
       spread: futurePrice != null ? futurePrice - spot.price : null,
       zScore: zScore.toFixed(2),
       rollingMean: rollingMean.toFixed(2),
@@ -98,7 +112,7 @@ export async function GET() {
       where: { id: "spot" },
       update: { data: data as any },
       create: { id: "spot", data: data as any },
-    }).catch(() => {});
+    }).catch((e) => console.error("[vix/spot] cache upsert:", e));
 
     return NextResponse.json(data, { headers: CC });
   } catch (err) {

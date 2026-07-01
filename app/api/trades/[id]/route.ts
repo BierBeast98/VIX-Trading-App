@@ -60,7 +60,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       await prisma.position.update({
         where: { id: trade.positionId },
         data: { status: hasExit ? "closed" : "open" },
-      }).catch(() => { /* position may not exist */ });
+      }).catch((e) => console.error("[trades PUT] position status sync:", e));
     }
 
     return NextResponse.json(trade);
@@ -80,7 +80,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await prisma.trade.delete({ where: { id } });
     // Also delete linked position if it exists
     if (trade?.positionId) {
-      await prisma.position.delete({ where: { id: trade.positionId } }).catch(() => {});
+      await prisma.position.delete({ where: { id: trade.positionId } }).catch((e) => console.error("[trades DELETE] linked position delete:", e));
     }
     return NextResponse.json({ success: true });
   } catch (err) {
