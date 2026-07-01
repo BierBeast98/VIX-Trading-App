@@ -29,6 +29,9 @@ export async function GET() {
       orderBy: { entryDate: "desc" },
       include: { position: { select: { name: true, leverageRatio: true } } },
     });
+    // Bewusst KEIN Cache-Control-Header: Trades sind der mutabelste Endpoint
+    // (anlegen/schließen/editieren mit sofortigem SWR-mutate) — ein Edge-Cache
+    // würde nach Mutationen veraltete Daten liefern.
     return NextResponse.json(trades);
   } catch {
     return NextResponse.json([]);

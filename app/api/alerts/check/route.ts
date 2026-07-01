@@ -34,16 +34,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: "No settings or email configured" });
     }
 
-    /** Returns true if the same alertType was already sent within the last 30 minutes */
-    async function isOnCooldown(alertType: string): Promise<boolean> {
-      const cutoff = new Date(Date.now() - 30 * 60 * 1000);
-      const recent = await prisma.alertLog.findFirst({
-        where: { alertType, sentAt: { gte: cutoff } },
-        select: { id: true },
-      });
-      return recent !== null;
-    }
-
     const alertSettings: AlertSettings = {
       vixLowThreshold: settings.vixLowThreshold,
       stdDevMultiplier: settings.stdDevMultiplier,
@@ -58,10 +48,33 @@ export async function GET(req: NextRequest) {
 
     const triggered: AlertResult[] = [];
 
-    // Get current VIX
-    const spot = await getVixSpot();
+    // Externe Quellen + DB-Reads parallel statt sequenziell
+    const vontobelIsin = settings.vontobelIsin || undefined;
+    const [spot, futureQuote, positions, histCache] = await Promise.all([
+      getVixSpot(),
+      getVontobelFuturesQuote(vontobelIsin),
+      prisma.position.findMany({ where: { status: "open" } }),
+      prisma.vixCache.findUnique({ where: { id: "history_closes" } }),
+    ]);
     if (!spot) {
       return NextResponse.json({ message: "VIX data unavailable" });
+    }
+
+    // Gecachte Bids für alle offenen Positionen in EINEM Query
+    // (statt zwei findUnique-Runden pro Position für Spike + Trailing Stop)
+    const bidByCert = new Map<string, number | null>();
+    if (positions.length > 0) {
+      try {
+        const rows = await prisma.vixCache.findMany({
+          where: { id: { in: positions.map((p) => `vontobel_${p.certificateId}`) } },
+        });
+        for (const row of rows) {
+          const bid = (row.data as { bid?: number | null }).bid ?? null;
+          bidByCert.set(row.id.replace(/^vontobel_/, ""), bid);
+        }
+      } catch (e) {
+        console.error("[alerts/check] bid cache read:", e);
+      }
     }
 
     // Entry alerts
@@ -69,7 +82,6 @@ export async function GET(req: NextRequest) {
     if (entryAlert) triggered.push(entryAlert);
 
     // Std dev alert — use rolling window from settings
-    const histCache = await prisma.vixCache.findUnique({ where: { id: "history_closes" } });
     if (histCache) {
       const allCloses = (histCache.data as { closes: number[] }).closes || [];
       const windowCloses = allCloses.slice(-settings.rollingWindowDays);
@@ -90,78 +102,45 @@ export async function GET(req: NextRequest) {
     }
 
     // VX Futures Spike (Vontobel) — unabhängig von offenen Positionen
-    const positions = await prisma.position.findMany({ where: { status: "open" } });
-    {
-      const vontobelIsin = settings.vontobelIsin || undefined;
-      const futureQuote = await getVontobelFuturesQuote(vontobelIsin);
-
-      if (futureQuote && futureQuote.previousClose > 0) {
-        const bidPrices = await Promise.all(
-          positions.map(async (p) => {
-            try {
-              const cached = await prisma.vixCache.findUnique({
-                where: { id: `vontobel_${p.certificateId}` },
-              });
-              if (cached) {
-                const data = cached.data as { bid?: number | null };
-                return data.bid ?? null;
-              }
-            } catch { /* noop */ }
-            return null;
-          })
-        );
-
-        const spikeAlert = checkVixSpike(
-          futureQuote.price,
-          futureQuote.previousClose,
-          positions.map((p, i) => ({
-            id: p.id,
-            certificateId: p.certificateId,
-            entryVix: p.entryVix,
-            entryPrice: p.entryPrice,
-            currentBarrier: p.currentBarrier,
-            leverageRatio: p.leverageRatio,
-            currentBid: bidPrices[i],
-          })),
-          alertSettings
-        );
-        if (spikeAlert) triggered.push(spikeAlert);
-      }
+    if (futureQuote && futureQuote.previousClose > 0) {
+      const spikeAlert = checkVixSpike(
+        futureQuote.price,
+        futureQuote.previousClose,
+        positions.map((p) => ({
+          id: p.id,
+          certificateId: p.certificateId,
+          entryVix: p.entryVix,
+          entryPrice: p.entryPrice,
+          currentBarrier: p.currentBarrier,
+          leverageRatio: p.leverageRatio,
+          currentBid: bidByCert.get(p.certificateId) ?? null,
+        })),
+        alertSettings
+      );
+      if (spikeAlert) triggered.push(spikeAlert);
     }
 
-    // Trailing Stop — check all open positions in parallel
+    // Trailing Stop — Bids kommen aus dem bereits geladenen bidByCert-Batch
     if (positions.length > 0 && alertSettings.trailingStopConfig.enabled) {
-      const tsResults = await Promise.all(
-        positions.map(async (p) => {
-          let bid: number | null = null;
-          try {
-            const cached = await prisma.vixCache.findUnique({
-              where: { id: `vontobel_${p.certificateId}` },
-            });
-            if (cached) {
-              const data = cached.data as { bid?: number | null };
-              bid = data.bid ?? null;
-            }
-          } catch { /* noop */ }
+      const tsResults = positions.map((p) => {
+        const bid = bidByCert.get(p.certificateId) ?? null;
+        if (bid == null || p.entryPrice <= 0) return null;
 
-          if (bid == null || p.entryPrice <= 0) return null;
-
-          const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
-          const tsResult = checkTrailingStop(
-            {
-              positionId: p.id,
-              certificateId: p.certificateId,
-              currentPnlPct,
-              currentFloor: p.trailingStopFloor,
-              peakPnlPct: p.peakPnlPct,
-              entryPrice: p.entryPrice,
-              currentBid: bid,
-            },
-            alertSettings
-          );
-          return tsResult ? { alert: tsResult.alert, positionId: p.id, newFloor: tsResult.newFloor, newPeakPnlPct: tsResult.newPeakPnlPct } : null;
-        })
-      );
+        const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
+        const tsResult = checkTrailingStop(
+          {
+            positionId: p.id,
+            certificateId: p.certificateId,
+            currentPnlPct,
+            currentFloor: p.trailingStopFloor,
+            peakPnlPct: p.peakPnlPct,
+            entryPrice: p.entryPrice,
+            currentBid: bid,
+          },
+          alertSettings
+        );
+        return tsResult ? { alert: tsResult.alert, positionId: p.id, newFloor: tsResult.newFloor, newPeakPnlPct: tsResult.newPeakPnlPct } : null;
+      });
 
       // Apply position updates in parallel for all triggered trailing stops
       const updates = tsResults.filter((r): r is NonNullable<typeof r> => r !== null);
@@ -188,9 +167,21 @@ export async function GET(req: NextRequest) {
     }
 
     // Send emails and log — with 30-min cooldown per alert type
+    // Cooldown-Typen in EINEM Query laden statt einer Abfrage pro Alert
+    const cooldownCutoff = new Date(Date.now() - 30 * 60 * 1000);
+    const typesOnCooldown = new Set(
+      (
+        await prisma.alertLog.findMany({
+          where: { sentAt: { gte: cooldownCutoff } },
+          select: { alertType: true },
+        })
+      ).map((r) => r.alertType)
+    );
+
     const sent: AlertResult[] = [];
     for (const alert of triggered) {
-      if (await isOnCooldown(alert.type)) continue;
+      if (typesOnCooldown.has(alert.type)) continue;
+      typesOnCooldown.add(alert.type); // verhindert Doppel-Versand desselben Typs im selben Lauf
       if (settings.alertEmail) {
         await sendAlertEmail(alert, settings.alertEmail);
       }
