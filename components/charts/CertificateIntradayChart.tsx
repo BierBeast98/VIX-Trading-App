@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -10,8 +11,17 @@ import {
   Tooltip,
   ReferenceLine,
 } from "recharts";
-import { format } from "date-fns";
-import { de } from "date-fns/locale";
+
+// Intl.DateTimeFormat einmalig instanziieren — der Konstruktor ist teuer, format() ist billig
+const CET_TIME_FMT = new Intl.DateTimeFormat("de-DE", {
+  timeZone: "Europe/Berlin",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+const CET_DATE_FMT = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Europe/Berlin",
+}); // YYYY-MM-DD
 
 interface DataPoint {
   date: string;
@@ -54,59 +64,76 @@ const CustomTooltip = ({
   return null;
 };
 
-export function CertificateIntradayChart({
+function CertificateIntradayChartInner({
   data,
   entryPrice,
   height = 200,
   direction = "short",
   name,
 }: CertificateIntradayChartProps) {
-  // Helper: get CET date string
-  const getCetDateStr = (dt: Date) =>
-    dt.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+  const { formatted, minVal, maxVal, chartColor } = useMemo(() => {
+    const getCetDateStr = (dt: Date) => CET_DATE_FMT.format(dt);
+    const getCetLabel = (dt: Date) => CET_TIME_FMT.format(dt); // "HH:mm" in CET
+    const getCetMinutes = (dt: Date) => {
+      const [h, m] = getCetLabel(dt).split(":").map(Number);
+      return h * 60 + m;
+    };
 
-  const getCetMinutes = (dt: Date) => {
-    const cetStr = dt.toLocaleString("en-US", { timeZone: "Europe/Berlin" });
-    const cetDate = new Date(cetStr);
-    return cetDate.getHours() * 60 + cetDate.getMinutes();
-  };
-
-  // Find last trading day
-  const lastTradingDay = (() => {
+    // Find last trading day
     const dates = data.map((d) => getCetDateStr(new Date(d.date)));
     const unique = [...new Set(dates)].sort();
-    return unique[unique.length - 1] ?? null;
-  })();
+    const lastTradingDay = unique[unique.length - 1] ?? null;
 
-  // Filter to last trading day, 08:00–22:00 CET
-  const filtered = lastTradingDay
-    ? data.filter((d) => {
-        try {
-          const dt = new Date(d.date);
-          if (getCetDateStr(dt) !== lastTradingDay) return false;
-          const totalMin = getCetMinutes(dt);
-          return totalMin >= 8 * 60 && totalMin <= 22 * 60;
-        } catch { return false; }
-      })
-    : data;
+    // Filter to last trading day, 08:00–22:00 CET
+    const filtered = lastTradingDay
+      ? data.filter((d) => {
+          try {
+            const dt = new Date(d.date);
+            if (getCetDateStr(dt) !== lastTradingDay) return false;
+            const totalMin = getCetMinutes(dt);
+            return totalMin >= 8 * 60 && totalMin <= 22 * 60;
+          } catch { return false; }
+        })
+      : data;
 
-  const formatted = filtered.map((d) => ({
-    ...d,
-    label: (() => {
-      try { return format(new Date(d.date), "HH:mm", { locale: de }); }
-      catch { return d.date; }
-    })(),
-  }));
+    const formatted = filtered.map((d) => ({
+      ...d,
+      label: (() => {
+        try { return getCetLabel(new Date(d.date)); }
+        catch { return d.date; }
+      })(),
+    }));
 
-  // Add boundary padding
-  if (formatted.length > 0) {
-    if (formatted[0].label > "08:00") {
-      formatted.unshift({ date: "", close: null as any, label: "08:00" });
+    // Add boundary padding
+    if (formatted.length > 0) {
+      if (formatted[0].label > "08:00") {
+        formatted.unshift({ date: "", close: null as any, label: "08:00" });
+      }
+      if (formatted[formatted.length - 1].label < "22:00") {
+        formatted.push({ date: "", close: null as any, label: "22:00" });
+      }
     }
-    if (formatted[formatted.length - 1].label < "22:00") {
-      formatted.push({ date: "", close: null as any, label: "22:00" });
-    }
-  }
+
+    const values = formatted.map((d) => d.close).filter((v) => v > 0);
+    const dataMin = Math.min(...values);
+    const dataMax = Math.max(...values);
+    const range = dataMax - dataMin || 0.1;
+    const padding = Math.max(range * 0.08, 0.02);
+    // Include entry price only if it's close to data range (within 50% of range)
+    const effectiveMin = entryPrice && entryPrice >= dataMin - range * 0.5
+      ? Math.min(dataMin, entryPrice) : dataMin;
+
+    // Determine color based on P&L direction
+    const lastPrice = values[values.length - 1] ?? 0;
+    const isProfit = entryPrice ? (direction === "short" ? lastPrice < entryPrice : lastPrice > entryPrice) : true;
+
+    return {
+      formatted,
+      minVal: effectiveMin - padding,
+      maxVal: dataMax + padding,
+      chartColor: isProfit ? "#B8E15A" : "#EF4444",
+    };
+  }, [data, entryPrice, direction]);
 
   if (formatted.length === 0) {
     return (
@@ -115,22 +142,6 @@ export function CertificateIntradayChart({
       </div>
     );
   }
-
-  const values = formatted.map((d) => d.close).filter((v) => v > 0);
-  const dataMin = Math.min(...values);
-  const dataMax = Math.max(...values);
-  const range = dataMax - dataMin || 0.1;
-  const padding = Math.max(range * 0.08, 0.02);
-  // Include entry price only if it's close to data range (within 50% of range)
-  const effectiveMin = entryPrice && entryPrice >= dataMin - range * 0.5
-    ? Math.min(dataMin, entryPrice) : dataMin;
-  const minVal = effectiveMin - padding;
-  const maxVal = dataMax + padding;
-
-  // Determine color based on P&L direction
-  const lastPrice = values[values.length - 1] ?? 0;
-  const isProfit = entryPrice ? (direction === "short" ? lastPrice < entryPrice : lastPrice > entryPrice) : true;
-  const chartColor = isProfit ? "#B8E15A" : "#EF4444";
 
   return (
     <div>
@@ -189,9 +200,12 @@ export function CertificateIntradayChart({
             dot={false}
             activeDot={{ r: 4, fill: chartColor, stroke: "#0C0C0F", strokeWidth: 2 }}
             connectNulls
+            isAnimationActive={false}
           />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
+
+export const CertificateIntradayChart = memo(CertificateIntradayChartInner);

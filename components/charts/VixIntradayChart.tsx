@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -10,8 +11,17 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import { format } from "date-fns";
-import { de } from "date-fns/locale";
+
+// Intl.DateTimeFormat einmalig instanziieren — der Konstruktor ist teuer, format() ist billig
+const CET_TIME_FMT = new Intl.DateTimeFormat("de-DE", {
+  timeZone: "Europe/Berlin",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+const CET_DATE_FMT = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Europe/Berlin",
+}); // YYYY-MM-DD
 
 interface DataPoint {
   date: string;
@@ -67,90 +77,96 @@ const CustomTooltip = ({
   return null;
 };
 
-export function VixIntradayChart({
+function VixIntradayChartInner({
   data,
   futuresData = [],
   height = 200,
   minimal = false,
 }: VixIntradayChartProps) {
-  // Helper: get CET total minutes for a Date
-  const getCetMinutes = (dt: Date) => {
-    // CET = UTC+1 (winter) / CEST = UTC+2 (summer)
-    // Use Intl to get actual CET offset
-    const cetStr = dt.toLocaleString("en-US", { timeZone: "Europe/Berlin" });
-    const cetDate = new Date(cetStr);
-    return cetDate.getHours() * 60 + cetDate.getMinutes();
-  };
+  const { formatted, futDataLength, minVal, maxVal } = useMemo(() => {
+    const getCetLabel = (dt: Date) => CET_TIME_FMT.format(dt); // "HH:mm" in CET
+    const getCetMinutes = (dt: Date) => {
+      const [h, m] = getCetLabel(dt).split(":").map(Number);
+      return h * 60 + m;
+    };
+    const getCetDateStr = (dt: Date) => CET_DATE_FMT.format(dt); // YYYY-MM-DD
 
-  const getCetDateStr = (dt: Date) => {
-    return dt.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }); // YYYY-MM-DD
-  };
-
-  // Find the last trading day (most recent date with data)
-  const lastTradingDay = (() => {
+    // Find the last trading day (most recent date with data)
     const dates = data.map((d) => getCetDateStr(new Date(d.date)));
     const unique = [...new Set(dates)].sort();
-    return unique[unique.length - 1] ?? null;
-  })();
+    const lastTradingDay = unique[unique.length - 1] ?? null;
 
-  // Filter to last trading day, 08:30–22:30 CET
-  const filterSession = (arr: DataPoint[]) => {
-    if (!lastTradingDay) return arr;
-    return arr.filter((d) => {
-      try {
-        const dt = new Date(d.date);
-        if (getCetDateStr(dt) !== lastTradingDay) return false;
-        const totalMin = getCetMinutes(dt);
-        return totalMin >= 8 * 60 + 30 && totalMin <= 22 * 60 + 30;
-      } catch { return false; }
-    });
-  };
+    // Filter to last trading day, 08:30–22:30 CET
+    const filterSession = (arr: DataPoint[]) => {
+      if (!lastTradingDay) return arr;
+      return arr.filter((d) => {
+        try {
+          const dt = new Date(d.date);
+          if (getCetDateStr(dt) !== lastTradingDay) return false;
+          const totalMin = getCetMinutes(dt);
+          return totalMin >= 8 * 60 + 30 && totalMin <= 22 * 60 + 30;
+        } catch { return false; }
+      });
+    };
 
-  const spotData = filterSession(data);
-  const futData = filterSession(futuresData);
+    const spotData = filterSession(data);
+    const futData = filterSession(futuresData);
 
-  // Build futures lookup by date key (ISO string minute-precision match)
-  const futuresMap = new Map(futData.map((d) => [d.date, d.close]));
+    // Build futures lookup by date key (ISO string minute-precision match)
+    const futuresMap = new Map(futData.map((d) => [d.date, d.close]));
 
-  // Build formatted data with boundary padding at 08:30 and 22:30
-  const formatted = spotData.map((d) => ({
-    ...d,
-    futures: futuresMap.get(d.date) ?? null,
-    label: (() => {
-      try { return format(new Date(d.date), "HH:mm", { locale: de }); }
-      catch { return d.date; }
-    })(),
-  }));
+    // Build formatted data with boundary padding at 08:30 and 22:30
+    const formatted = spotData.map((d) => ({
+      ...d,
+      futures: futuresMap.get(d.date) ?? null,
+      label: (() => {
+        try { return getCetLabel(new Date(d.date)); }
+        catch { return d.date; }
+      })(),
+    }));
 
-  // Add small x-axis padding (30 min before first / after last data point)
-  // Only extend to 08:30/22:30 if data is already within 2h of those boundaries
-  if (formatted.length > 0) {
-    const firstLabel = formatted[0].label;
-    const lastLabel = formatted[formatted.length - 1].label;
-    // Pad left: use 08:30 if data starts before 10:30, otherwise 30min before first point
-    if (firstLabel <= "10:30") {
-      if (firstLabel > "08:30") {
-        formatted.unshift({ date: "", close: null as any, futures: null, label: "08:30" });
+    // Add small x-axis padding (30 min before first / after last data point)
+    // Only extend to 08:30/22:30 if data is already within 2h of those boundaries
+    if (formatted.length > 0) {
+      const firstLabel = formatted[0].label;
+      const lastLabel = formatted[formatted.length - 1].label;
+      // Pad left: use 08:30 if data starts before 10:30, otherwise 30min before first point
+      if (firstLabel <= "10:30") {
+        if (firstLabel > "08:30") {
+          formatted.unshift({ date: "", close: null as any, futures: null, label: "08:30" });
+        }
+      } else {
+        // Calculate 30 min before first data point
+        const [h, m] = firstLabel.split(":").map(Number);
+        const padMin = h * 60 + m - 30;
+        const padLabel = `${String(Math.floor(padMin / 60)).padStart(2, "0")}:${String(padMin % 60).padStart(2, "0")}`;
+        formatted.unshift({ date: "", close: null as any, futures: null, label: padLabel });
       }
-    } else {
-      // Calculate 30 min before first data point
-      const [h, m] = firstLabel.split(":").map(Number);
-      const padMin = h * 60 + m - 30;
-      const padLabel = `${String(Math.floor(padMin / 60)).padStart(2, "0")}:${String(padMin % 60).padStart(2, "0")}`;
-      formatted.unshift({ date: "", close: null as any, futures: null, label: padLabel });
-    }
-    // Pad right: use 22:30 if data ends after 20:30, otherwise 30min after last point
-    if (lastLabel >= "20:30") {
-      if (lastLabel < "22:30") {
-        formatted.push({ date: "", close: null as any, futures: null, label: "22:30" });
+      // Pad right: use 22:30 if data ends after 20:30, otherwise 30min after last point
+      if (lastLabel >= "20:30") {
+        if (lastLabel < "22:30") {
+          formatted.push({ date: "", close: null as any, futures: null, label: "22:30" });
+        }
+      } else {
+        const [h, m] = lastLabel.split(":").map(Number);
+        const padMin = h * 60 + m + 30;
+        const padLabel = `${String(Math.floor(padMin / 60)).padStart(2, "0")}:${String(padMin % 60).padStart(2, "0")}`;
+        formatted.push({ date: "", close: null as any, futures: null, label: padLabel });
       }
-    } else {
-      const [h, m] = lastLabel.split(":").map(Number);
-      const padMin = h * 60 + m + 30;
-      const padLabel = `${String(Math.floor(padMin / 60)).padStart(2, "0")}:${String(padMin % 60).padStart(2, "0")}`;
-      formatted.push({ date: "", close: null as any, futures: null, label: padLabel });
     }
-  }
+
+    const allValues = [
+      ...formatted.map((d) => d.close),
+      ...futData.map((d) => d.close),
+    ].filter((v) => v > 0);
+
+    return {
+      formatted,
+      futDataLength: futData.length,
+      minVal: Math.min(...allValues) - 0.15,
+      maxVal: Math.max(...allValues) + 0.15,
+    };
+  }, [data, futuresData]);
 
   if (formatted.length === 0) {
     return (
@@ -159,14 +175,6 @@ export function VixIntradayChart({
       </div>
     );
   }
-
-  const allValues = [
-    ...formatted.map((d) => d.close),
-    ...futData.map((d) => d.close),
-  ].filter((v) => v > 0);
-
-  const minVal = Math.min(...allValues) - 0.15;
-  const maxVal = Math.max(...allValues) + 0.15;
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -208,9 +216,10 @@ export function VixIntradayChart({
           dot={false}
           activeDot={minimal ? false : { r: 4, fill: "#B8E15A", stroke: "#0C0C0F", strokeWidth: 2 }}
           connectNulls
+          isAnimationActive={false}
         />
         {/* VIX 3M intraday — amber line, futures proxy */}
-        {!minimal && futuresData.length > 0 && (
+        {!minimal && futDataLength > 0 && (
           <Line
             type="monotone"
             dataKey="futures"
@@ -219,9 +228,12 @@ export function VixIntradayChart({
             dot={false}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#0C0C0F", strokeWidth: 2 }}
             connectNulls
+            isAnimationActive={false}
           />
         )}
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
+
+export const VixIntradayChart = memo(VixIntradayChartInner);

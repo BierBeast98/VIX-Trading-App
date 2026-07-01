@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { getRefreshInterval } from "@/lib/trading-hours";
 import { Plus, Pencil, Trash2, Download, Bell, BellOff, TrendingUp, Loader2, ChevronDown } from "lucide-react";
@@ -43,6 +43,297 @@ function holdDaysFromDates(entryDate: string, exitDate: string | null): number |
   if (!Number.isFinite(ms)) return null;
   return Math.round(ms / 86_400_000);
 }
+
+interface TradeItemProps {
+  trade: Trade;
+  liveBid: number | null;
+  isDeleting: boolean;
+  onEdit: (trade: Trade) => void;
+  onDelete: (id: string) => void;
+}
+
+// Memoized: re-rendert nur die betroffene Card beim Auf-/Zuklappen oder Preis-Update,
+// nicht die gesamte Liste
+const TradeCardMobile = memo(function TradeCardMobile({
+  trade,
+  liveBid,
+  isExpanded,
+  isDeleting,
+  onToggle,
+  onEdit,
+  onDelete,
+}: TradeItemProps & { isExpanded: boolean; onToggle: (id: string) => void }) {
+  const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
+  const abstand = trade.entryVix && trade.barrierLevel
+    ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+  const isOpen = !trade.exitDate;
+  const currentPnlPct = liveBid && trade.entryPrice
+    ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
+  const currentPnlEur = liveBid && trade.entryPrice && trade.quantity
+    ? (liveBid - trade.entryPrice) * trade.quantity : null;
+  return (
+    <div
+      className="rounded-2xl overflow-hidden"
+      style={{ background: "#141418", border: "1px solid #1E1E28" }}
+    >
+      {/* Compact row — always visible */}
+      <button
+        className="w-full flex items-center justify-between p-3.5 text-left"
+        onClick={() => onToggle(trade.id)}
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0"
+            style={{
+              background: trade.direction === "long" ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 77, 77, 0.15)",
+              color: trade.direction === "long" ? "#3B82F6" : "#FF4D4D",
+            }}
+          >
+            {trade.direction === "long" ? "LONG" : "SHORT"}
+          </span>
+          <div className="min-w-0">
+            <span className="text-sm font-medium text-white truncate block">{trade.certificateId}</span>
+            <span className="text-[10px]" style={{ color: "#8B8FA8" }}>{formatDate(trade.entryDate)}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          {isOpen ? (
+            currentPnlPct != null ? (
+              <div className="text-right">
+                <div className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                  {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 1)}%
+                </div>
+                {currentPnlEur != null && (
+                  <div className="text-[10px]" style={{ color: currentPnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {currentPnlEur >= 0 ? "+" : ""}{currentPnlEur.toFixed(0)} €
+                  </div>
+                )}
+              </div>
+            ) : <Badge variant="accent">Offen</Badge>
+          ) : (
+            <span
+              className="text-sm font-bold"
+              style={{ color: (trade.returnPct ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" }}
+            >
+              {trade.returnPct != null ? `${trade.returnPct >= 0 ? "+" : ""}${formatNumber(trade.returnPct, 1)}%` : "—"}
+            </span>
+          )}
+          <ChevronDown
+            size={16}
+            className="transition-transform"
+            style={{
+              color: "#8B8FA8",
+              transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+            }}
+          />
+        </div>
+      </button>
+
+      {/* Expanded details */}
+      {isExpanded && (
+        <div className="px-3.5 pb-3.5 space-y-2.5" style={{ borderTop: "1px solid #1E1E28" }}>
+          <div className="grid grid-cols-2 gap-2 pt-2.5">
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Stück</span>
+              <span className="text-sm text-white">{trade.quantity ?? "—"}</span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Invest.</span>
+              <span className="text-sm text-white">{investment ? `${investment.toFixed(0)} €` : "—"}</span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Kurs Ein</span>
+              <span className="text-sm text-white">{trade.entryPrice != null ? `${formatNumber(trade.entryPrice, 3)} €` : "—"}</span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Kurs Aus</span>
+              <span className="text-sm" style={{ color: trade.exitPrice != null ? "#fff" : "#8B8FA8" }}>
+                {trade.exitPrice != null ? `${formatNumber(trade.exitPrice, 3)} €` : "—"}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>VIX Future</span>
+              <span className="text-sm text-white">{formatNumber(trade.entryVix)}</span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Barrier</span>
+              <span className="text-sm text-white">{formatNumber(trade.barrierLevel, 2)} $</span>
+              {abstand != null && (
+                <span
+                  className="text-[10px] ml-1"
+                  style={{ color: abstand < 15 ? "#FF4D4D" : abstand < 30 ? "#F59E0B" : "#8B8FA8" }}
+                >
+                  ({abstand.toFixed(0)}%)
+                </span>
+              )}
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Hebel</span>
+              <span className="text-sm" style={{ color: "#B8E15A" }}>
+                {trade.leverageRatio != null ? `×${formatNumber(trade.leverageRatio, 2)}` : "—"}
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Haltetage</span>
+              <span className="text-sm text-white">{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</span>
+            </div>
+          </div>
+          {isOpen && liveBid != null && (
+            <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
+              <div>
+                <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktueller Kurs</span>
+                <span className="text-sm text-white">{formatNumber(liveBid, 3)} €</span>
+              </div>
+              {currentPnlPct != null && (
+                <div className="text-right">
+                  <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Unrealisiert</span>
+                  <span className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                    {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 2)}%
+                    {currentPnlEur != null && ` / ${currentPnlEur >= 0 ? "+" : ""}${currentPnlEur.toFixed(0)} €`}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          {trade.returnPct != null && (
+            <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
+              <span className="text-xs" style={{ color: "#8B8FA8" }}>Rendite</span>
+              <span className="text-sm font-bold" style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                {trade.returnPct >= 0 ? "+" : ""}{formatNumber(trade.returnPct, 2)}%
+              </span>
+            </div>
+          )}
+          {trade.notes && (
+            <p className="text-xs pt-1" style={{ color: "#8B8FA8" }}>{trade.notes}</p>
+          )}
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={() => onEdit(trade)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium"
+              style={{ background: "#1E1E28", color: "#8B8FA8" }}
+            >
+              <Pencil size={12} /> Bearbeiten
+            </button>
+            <button
+              onClick={() => onDelete(trade.id)}
+              disabled={isDeleting}
+              className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium"
+              style={{ background: "rgba(255,77,77,0.1)", color: "#FF4D4D" }}
+            >
+              <Trash2 size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const TradeRowDesktop = memo(function TradeRowDesktop({
+  trade,
+  index,
+  liveBid,
+  isDeleting,
+  onEdit,
+  onDelete,
+}: TradeItemProps & { index: number }) {
+  const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
+  const abstand = trade.entryVix && trade.barrierLevel
+    ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
+    : null;
+  const tradeIsOpen = !trade.exitDate;
+  const tradePnlPct = liveBid && trade.entryPrice
+    ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
+  const tradePnlEur = liveBid && trade.entryPrice && trade.quantity
+    ? (liveBid - trade.entryPrice) * trade.quantity : null;
+  return (
+    <tr className="border-b transition-colors" style={{ borderColor: "#1E1E28", background: index % 2 === 0 ? "transparent" : "#0D0D11" }}>
+      <td className="py-3 px-2 font-mono text-xs text-white whitespace-nowrap">{trade.certificateId}</td>
+      <td className="py-3 px-2">
+        <span
+          className="px-1.5 py-0.5 rounded text-xs font-medium"
+          style={{
+            background: trade.direction === "long" ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 77, 77, 0.15)",
+            color: trade.direction === "long" ? "#3B82F6" : "#FF4D4D",
+          }}
+        >
+          {trade.direction === "long" ? "L" : "S"}
+        </span>
+      </td>
+      <td className="py-3 px-2 whitespace-nowrap text-xs" style={{ color: "#8B8FA8" }}>{formatDate(trade.entryDate)}</td>
+      <td className="py-3 px-2">
+        {trade.exitDate
+          ? <Badge variant="muted">{formatDate(trade.exitDate)}</Badge>
+          : <Badge variant="accent">Offen</Badge>
+        }
+      </td>
+      <td className="py-3 px-2 text-white text-xs">{trade.quantity ?? "—"}</td>
+      <td className="py-3 px-2 text-white text-xs">
+        {trade.entryPrice !== null ? `${formatNumber(trade.entryPrice, 3)} €` : "—"}
+      </td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
+        {trade.exitPrice !== null ? `${formatNumber(trade.exitPrice, 3)} €` : "—"}
+      </td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
+        {investment !== null ? `${investment.toFixed(0)} €` : "—"}
+      </td>
+      <td className="py-3 px-2 text-white text-xs">
+        <div>{formatNumber(trade.entryVix)}</div>
+        {abstand !== null && (
+          <div className="text-xs" style={{ color: abstand < 15 ? "#FF4D4D" : abstand < 30 ? "#F59E0B" : "#8B8FA8" }}>
+            Abst. {abstand.toFixed(0)}%
+          </div>
+        )}
+      </td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
+        {formatNumber(trade.barrierLevel, 2)} $
+      </td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
+        {trade.strikePrice !== null ? `${formatNumber(trade.strikePrice, 4)} $` : "—"}
+      </td>
+      <td className="py-3 px-2 text-xs">
+        {trade.leverageRatio !== null ? (
+          <span style={{ color: "#B8E15A" }}>×{formatNumber(trade.leverageRatio, 2)}</span>
+        ) : "—"}
+      </td>
+      <td className="py-3 px-2 text-xs">
+        {tradeIsOpen && tradePnlPct != null ? (
+          <div>
+            <span style={{ color: tradePnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+              {tradePnlPct >= 0 ? "+" : ""}{formatNumber(tradePnlPct, 1)}%
+            </span>
+            {tradePnlEur != null && (
+              <div style={{ color: tradePnlEur >= 0 ? "#22C55E" : "#FF4D4D", fontSize: "10px" }}>
+                {tradePnlEur >= 0 ? "+" : ""}{tradePnlEur.toFixed(0)} €
+              </div>
+            )}
+          </div>
+        ) : trade.returnPct !== null ? (
+          <span style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
+            {formatPct(trade.returnPct)}
+          </span>
+        ) : "—"}
+      </td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</td>
+      <td className="py-3 px-2">
+        {trade.alertTriggered
+          ? <Bell size={13} style={{ color: "#B8E15A" }} />
+          : <BellOff size={13} style={{ color: "#2A2A3A" }} />
+        }
+      </td>
+      <td className="py-3 px-2">
+        <div className="flex gap-1">
+          <button onClick={() => onEdit(trade)} className="rounded-lg p-1.5 transition-colors hover:bg-[#1E1E28]" style={{ color: "#8B8FA8" }}>
+            <Pencil size={12} />
+          </button>
+          <button onClick={() => onDelete(trade.id)} disabled={isDeleting} className="rounded-lg p-1.5 transition-colors hover:bg-[#FF4D4D22]" style={{ color: "#FF4D4D" }}>
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+});
 
 const EMPTY_FORM = {
   certificateId: "",
@@ -138,7 +429,7 @@ export default function TradesPage() {
     setModalOpen(true);
   };
 
-  const openEdit = (trade: Trade) => {
+  const openEdit = useCallback((trade: Trade) => {
     setEditTrade(trade);
     setForm({
       certificateId: trade.certificateId,
@@ -159,7 +450,7 @@ export default function TradesPage() {
       notes: trade.notes,
     });
     setModalOpen(true);
-  };
+  }, []);
 
   const handleSave = async () => {
     if (!/^[A-Z0-9]{12}$/.test(form.certificateId)) {
@@ -212,13 +503,17 @@ export default function TradesPage() {
     setSaving(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm("Trade wirklich löschen?")) return;
     setDeleting(id);
     const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
     if (res.ok) await mutateTrades();
     setDeleting(null);
-  };
+  }, [mutateTrades]);
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedTrade((prev) => (prev === id ? null : id));
+  }, []);
 
   const exportCSV = () => {
     const headers = ["ISIN", "Richtung", "Einstieg", "Ausstieg", "Stück", "Kurs Ein (€)", "Kurs Aus (€)", "Invest. (€)", "VIX Future Ein", "VIX Future Aus", "Barrier (USD)", "Basispreis (USD)", "Hebel", "Bezugsverh.", "Rendite %", "Haltetage", "Alert", "Notizen"];
@@ -510,175 +805,18 @@ export default function TradesPage() {
             </Button>
           </div>
         ) : (
-          trades.map((trade) => {
-            const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
-            const abstand = trade.entryVix && trade.barrierLevel
-              ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
-            const isOpen = !trade.exitDate;
-            const isExpanded = expandedTrade === trade.id;
-            const liveBid = isOpen ? (livePrices[trade.certificateId]?.bid ?? null) : null;
-            const currentPnlPct = liveBid && trade.entryPrice
-              ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
-            const currentPnlEur = liveBid && trade.entryPrice && trade.quantity
-              ? (liveBid - trade.entryPrice) * trade.quantity : null;
-            return (
-              <div
-                key={`mob-${trade.id}`}
-                className="rounded-2xl overflow-hidden"
-                style={{ background: "#141418", border: "1px solid #1E1E28" }}
-              >
-                {/* Compact row — always visible */}
-                <button
-                  className="w-full flex items-center justify-between p-3.5 text-left"
-                  onClick={() => setExpandedTrade(isExpanded ? null : trade.id)}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span
-                      className="px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0"
-                      style={{
-                        background: trade.direction === "long" ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 77, 77, 0.15)",
-                        color: trade.direction === "long" ? "#3B82F6" : "#FF4D4D",
-                      }}
-                    >
-                      {trade.direction === "long" ? "LONG" : "SHORT"}
-                    </span>
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium text-white truncate block">{trade.certificateId}</span>
-                      <span className="text-[10px]" style={{ color: "#8B8FA8" }}>{formatDate(trade.entryDate)}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    {isOpen ? (
-                      currentPnlPct != null ? (
-                        <div className="text-right">
-                          <div className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                            {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 1)}%
-                          </div>
-                          {currentPnlEur != null && (
-                            <div className="text-[10px]" style={{ color: currentPnlEur >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                              {currentPnlEur >= 0 ? "+" : ""}{currentPnlEur.toFixed(0)} €
-                            </div>
-                          )}
-                        </div>
-                      ) : <Badge variant="accent">Offen</Badge>
-                    ) : (
-                      <span
-                        className="text-sm font-bold"
-                        style={{ color: (trade.returnPct ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" }}
-                      >
-                        {trade.returnPct != null ? `${trade.returnPct >= 0 ? "+" : ""}${formatNumber(trade.returnPct, 1)}%` : "—"}
-                      </span>
-                    )}
-                    <ChevronDown
-                      size={16}
-                      className="transition-transform"
-                      style={{
-                        color: "#8B8FA8",
-                        transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
-                      }}
-                    />
-                  </div>
-                </button>
-
-                {/* Expanded details */}
-                {isExpanded && (
-                  <div className="px-3.5 pb-3.5 space-y-2.5" style={{ borderTop: "1px solid #1E1E28" }}>
-                    <div className="grid grid-cols-2 gap-2 pt-2.5">
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Stück</span>
-                        <span className="text-sm text-white">{trade.quantity ?? "—"}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Invest.</span>
-                        <span className="text-sm text-white">{investment ? `${investment.toFixed(0)} €` : "—"}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Kurs Ein</span>
-                        <span className="text-sm text-white">{trade.entryPrice != null ? `${formatNumber(trade.entryPrice, 3)} €` : "—"}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Kurs Aus</span>
-                        <span className="text-sm" style={{ color: trade.exitPrice != null ? "#fff" : "#8B8FA8" }}>
-                          {trade.exitPrice != null ? `${formatNumber(trade.exitPrice, 3)} €` : "—"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>VIX Future</span>
-                        <span className="text-sm text-white">{formatNumber(trade.entryVix)}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Barrier</span>
-                        <span className="text-sm text-white">{formatNumber(trade.barrierLevel, 2)} $</span>
-                        {abstand != null && (
-                          <span
-                            className="text-[10px] ml-1"
-                            style={{ color: abstand < 15 ? "#FF4D4D" : abstand < 30 ? "#F59E0B" : "#8B8FA8" }}
-                          >
-                            ({abstand.toFixed(0)}%)
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Hebel</span>
-                        <span className="text-sm" style={{ color: "#B8E15A" }}>
-                          {trade.leverageRatio != null ? `×${formatNumber(trade.leverageRatio, 2)}` : "—"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Haltetage</span>
-                        <span className="text-sm text-white">{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</span>
-                      </div>
-                    </div>
-                    {isOpen && liveBid != null && (
-                      <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
-                        <div>
-                          <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Aktueller Kurs</span>
-                          <span className="text-sm text-white">{formatNumber(liveBid, 3)} €</span>
-                        </div>
-                        {currentPnlPct != null && (
-                          <div className="text-right">
-                            <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Unrealisiert</span>
-                            <span className="text-sm font-bold" style={{ color: currentPnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                              {currentPnlPct >= 0 ? "+" : ""}{formatNumber(currentPnlPct, 2)}%
-                              {currentPnlEur != null && ` / ${currentPnlEur >= 0 ? "+" : ""}${currentPnlEur.toFixed(0)} €`}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {trade.returnPct != null && (
-                      <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
-                        <span className="text-xs" style={{ color: "#8B8FA8" }}>Rendite</span>
-                        <span className="text-sm font-bold" style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                          {trade.returnPct >= 0 ? "+" : ""}{formatNumber(trade.returnPct, 2)}%
-                        </span>
-                      </div>
-                    )}
-                    {trade.notes && (
-                      <p className="text-xs pt-1" style={{ color: "#8B8FA8" }}>{trade.notes}</p>
-                    )}
-                    <div className="flex gap-2 pt-1">
-                      <button
-                        onClick={() => openEdit(trade)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium"
-                        style={{ background: "#1E1E28", color: "#8B8FA8" }}
-                      >
-                        <Pencil size={12} /> Bearbeiten
-                      </button>
-                      <button
-                        onClick={() => handleDelete(trade.id)}
-                        disabled={deleting === trade.id}
-                        className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium"
-                        style={{ background: "rgba(255,77,77,0.1)", color: "#FF4D4D" }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
+          trades.map((trade) => (
+            <TradeCardMobile
+              key={`mob-${trade.id}`}
+              trade={trade}
+              liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
+              isExpanded={expandedTrade === trade.id}
+              isDeleting={deleting === trade.id}
+              onToggle={toggleExpanded}
+              onEdit={openEdit}
+              onDelete={handleDelete}
+            />
+          ))
         )}
       </div>
 
@@ -709,105 +847,17 @@ export default function TradesPage() {
                 </tr>
               </thead>
               <tbody>
-                {trades.map((trade, i) => {
-                  const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
-                  const abstand = trade.entryVix && trade.barrierLevel
-                    ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
-                    : null;
-                  const tradeIsOpen = !trade.exitDate;
-                  const tradeLiveBid = tradeIsOpen ? (livePrices[trade.certificateId]?.bid ?? null) : null;
-                  const tradePnlPct = tradeLiveBid && trade.entryPrice
-                    ? ((tradeLiveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
-                  const tradePnlEur = tradeLiveBid && trade.entryPrice && trade.quantity
-                    ? (tradeLiveBid - trade.entryPrice) * trade.quantity : null;
-                  return (
-                    <tr key={trade.id} className="border-b transition-colors" style={{ borderColor: "#1E1E28", background: i % 2 === 0 ? "transparent" : "#0D0D11" }}>
-                      <td className="py-3 px-2 font-mono text-xs text-white whitespace-nowrap">{trade.certificateId}</td>
-                      <td className="py-3 px-2">
-                        <span
-                          className="px-1.5 py-0.5 rounded text-xs font-medium"
-                          style={{
-                            background: trade.direction === "long" ? "rgba(59, 130, 246, 0.15)" : "rgba(255, 77, 77, 0.15)",
-                            color: trade.direction === "long" ? "#3B82F6" : "#FF4D4D",
-                          }}
-                        >
-                          {trade.direction === "long" ? "L" : "S"}
-                        </span>
-                      </td>
-                      <td className="py-3 px-2 whitespace-nowrap text-xs" style={{ color: "#8B8FA8" }}>{formatDate(trade.entryDate)}</td>
-                      <td className="py-3 px-2">
-                        {trade.exitDate
-                          ? <Badge variant="muted">{formatDate(trade.exitDate)}</Badge>
-                          : <Badge variant="accent">Offen</Badge>
-                        }
-                      </td>
-                      <td className="py-3 px-2 text-white text-xs">{trade.quantity ?? "—"}</td>
-                      <td className="py-3 px-2 text-white text-xs">
-                        {trade.entryPrice !== null ? `${formatNumber(trade.entryPrice, 3)} €` : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
-                        {trade.exitPrice !== null ? `${formatNumber(trade.exitPrice, 3)} €` : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
-                        {investment !== null ? `${investment.toFixed(0)} €` : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-white text-xs">
-                        <div>{formatNumber(trade.entryVix)}</div>
-                        {abstand !== null && (
-                          <div className="text-xs" style={{ color: abstand < 15 ? "#FF4D4D" : abstand < 30 ? "#F59E0B" : "#8B8FA8" }}>
-                            Abst. {abstand.toFixed(0)}%
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
-                        {formatNumber(trade.barrierLevel, 2)} $
-                      </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>
-                        {trade.strikePrice !== null ? `${formatNumber(trade.strikePrice, 4)} $` : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-xs">
-                        {trade.leverageRatio !== null ? (
-                          <span style={{ color: "#B8E15A" }}>×{formatNumber(trade.leverageRatio, 2)}</span>
-                        ) : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-xs">
-                        {tradeIsOpen && tradePnlPct != null ? (
-                          <div>
-                            <span style={{ color: tradePnlPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                              {tradePnlPct >= 0 ? "+" : ""}{formatNumber(tradePnlPct, 1)}%
-                            </span>
-                            {tradePnlEur != null && (
-                              <div style={{ color: tradePnlEur >= 0 ? "#22C55E" : "#FF4D4D", fontSize: "10px" }}>
-                                {tradePnlEur >= 0 ? "+" : ""}{tradePnlEur.toFixed(0)} €
-                              </div>
-                            )}
-                          </div>
-                        ) : trade.returnPct !== null ? (
-                          <span style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                            {formatPct(trade.returnPct)}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</td>
-                      <td className="py-3 px-2">
-                        {trade.alertTriggered
-                          ? <Bell size={13} style={{ color: "#B8E15A" }} />
-                          : <BellOff size={13} style={{ color: "#2A2A3A" }} />
-                        }
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex gap-1">
-                          <button onClick={() => openEdit(trade)} className="rounded-lg p-1.5 transition-colors hover:bg-[#1E1E28]" style={{ color: "#8B8FA8" }}>
-                            <Pencil size={12} />
-                          </button>
-                          <button onClick={() => handleDelete(trade.id)} disabled={deleting === trade.id} className="rounded-lg p-1.5 transition-colors hover:bg-[#FF4D4D22]" style={{ color: "#FF4D4D" }}>
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {trades.map((trade, i) => (
+                  <TradeRowDesktop
+                    key={trade.id}
+                    trade={trade}
+                    index={i}
+                    liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
+                    isDeleting={deleting === trade.id}
+                    onEdit={openEdit}
+                    onDelete={handleDelete}
+                  />
+                ))}
               </tbody>
             </table>
           </div>

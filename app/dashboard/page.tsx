@@ -2,15 +2,28 @@
 
 import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
+import dynamic from "next/dynamic";
 import { TrendingUp, TrendingDown, RefreshCw, Activity, Bell as BellIcon, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { VixHistoryChart } from "@/components/charts/VixHistoryChart";
-import { VixIntradayChart } from "@/components/charts/VixIntradayChart";
-import { CertificateIntradayChart } from "@/components/charts/CertificateIntradayChart";
 import { formatNumber, formatPct, formatDateTime } from "@/lib/utils";
 import { getRefreshInterval } from "@/lib/trading-hours";
+
+// Recharts (~200 KB) aus dem Seiten-Bundle halten — Charts laden nach der Hydration nach.
+// Platzhalter mit fixer Höhe verhindern Layout-Shift beim Nachladen.
+const VixHistoryChart = dynamic(
+  () => import("@/components/charts/VixHistoryChart").then((m) => m.VixHistoryChart),
+  { ssr: false, loading: () => <div style={{ height: 280 }} /> }
+);
+const VixIntradayChart = dynamic(
+  () => import("@/components/charts/VixIntradayChart").then((m) => m.VixIntradayChart),
+  { ssr: false, loading: () => <div style={{ height: 200 }} /> }
+);
+const CertificateIntradayChart = dynamic(
+  () => import("@/components/charts/CertificateIntradayChart").then((m) => m.CertificateIntradayChart),
+  { ssr: false, loading: () => <div style={{ height: 220 }} /> }
+);
 
 interface VixData {
   spot: {
@@ -155,11 +168,11 @@ export default function DashboardPage() {
   const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
 
   // Batch: Vontobel prices + intraday for all positions in a single request
-  const positionIds = positions.map((p) => p.certificateId);
   const allBatchIsins = useMemo(() => {
+    const positionIds = positions.map((p) => p.certificateId);
     const tradeIsins = openTrades.map((t) => t.certificateId).filter((id) => /^[A-Z0-9]{12}$/.test(id));
     return [...new Set([...positionIds, ...tradeIsins])];
-  }, [positionIds, openTrades]);
+  }, [positions, openTrades]);
   const { data: batchData } = useSWR<{
     prices: Record<string, VontobelPrice>;
     intraday: Record<string, IntradayPoint[]>;

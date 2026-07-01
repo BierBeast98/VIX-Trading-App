@@ -2,15 +2,22 @@
 
 import { useEffect, useState } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatPct, formatNumber } from "@/lib/utils";
 import { runBacktest, suggestPositionSize } from "@/lib/analytics";
-import { BacktestTradeChart } from "@/components/charts/BacktestTradeChart";
+
+// Recharts (~200 KB) aus dem Seiten-Bundle halten — Charts laden nach der Hydration nach
+const EntryBucketChart = dynamic(
+  () => import("@/components/charts/EntryBucketChart").then((m) => m.EntryBucketChart),
+  { ssr: false, loading: () => <div style={{ height: 200 }} /> }
+);
+const BacktestTradeChart = dynamic(
+  () => import("@/components/charts/BacktestTradeChart").then((m) => m.BacktestTradeChart),
+  { ssr: false, loading: () => <div style={{ height: 280 }} /> }
+);
 
 interface Metrics {
   totalTrades: number;
@@ -299,26 +306,7 @@ export default function AnalyticsPage() {
               <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
                 Durchschnittliche Rendite nach VIX-Einstiegslevel
               </p>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={data.entryAnalysis} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1E1E28" vertical={false} />
-                  <XAxis dataKey="range" tick={{ fill: "#8B8FA8", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#8B8FA8", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                  <Tooltip
-                    contentStyle={{ background: "#1A1A22", border: "1px solid #2E2E3A", borderRadius: "12px" }}
-                    labelStyle={{ color: "#8B8FA8" }}
-                    formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Ø Rendite"]}
-                  />
-                  <Bar dataKey="avgReturn" radius={[4, 4, 0, 0]}>
-                    {data.entryAnalysis.map((entry, i) => (
-                      <Cell
-                        key={i}
-                        fill={entry.avgReturn >= 0 ? "#B8E15A" : "#FF4D4D"}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <EntryBucketChart data={data.entryAnalysis} height={200} />
             </Card>
           )}
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -25,17 +26,21 @@ interface CorrelationChartProps {
   height?: number;
 }
 
-export function CorrelationChart({ data, height = 260 }: CorrelationChartProps) {
-  const formatted = data.map((d) => ({
-    ...d,
-    label: (() => {
-      try {
-        return format(new Date(d.date), "d. MMM", { locale: de });
-      } catch {
-        return d.date;
-      }
-    })(),
-  }));
+function CorrelationChartInner({ data, height = 260 }: CorrelationChartProps) {
+  const formatted = useMemo(
+    () =>
+      data.map((d) => ({
+        ...d,
+        label: (() => {
+          try {
+            return format(new Date(d.date), "d. MMM", { locale: de });
+          } catch {
+            return d.date;
+          }
+        })(),
+      })),
+    [data]
+  );
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -80,6 +85,7 @@ export function CorrelationChart({ data, height = 260 }: CorrelationChartProps) 
           fill="#3B82F6"
           fillOpacity={0.6}
           radius={[2, 2, 0, 0]}
+          isAnimationActive={false}
         />
         <Line
           yAxisId="vix"
@@ -89,8 +95,11 @@ export function CorrelationChart({ data, height = 260 }: CorrelationChartProps) 
           stroke="#B8E15A"
           strokeWidth={2}
           dot={false}
+          isAnimationActive={false}
         />
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
+
+export const CorrelationChart = memo(CorrelationChartInner);

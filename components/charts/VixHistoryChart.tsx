@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -69,7 +70,7 @@ const CustomTooltip = ({ active, payload }: TooltipProps) => {
   return null;
 };
 
-export function VixHistoryChart({
+function VixHistoryChartInner({
   data,
   futuresData = [],
   threshold = 15,
@@ -81,48 +82,52 @@ export function VixHistoryChart({
 
   const labelFormat = (isLongPeriod || isMediumPeriod) ? "M/yy" : "d.M.";
 
-  // Build date → futures price lookup for O(1) merge
-  const futuresMap = new Map(futuresData.map((d) => [d.date, d.close]));
+  const { formatted, minVal, maxVal, visibleTicks } = useMemo(() => {
+    // Build date → futures price lookup for O(1) merge
+    const futuresMap = new Map(futuresData.map((d) => [d.date, d.close]));
 
-  const formatted = data.map((d) => ({
-    ...d,
-    futures: futuresMap.get(d.date) ?? null,
-    label: (() => {
-      try {
-        return format(new Date(d.date), labelFormat, { locale: de });
-      } catch {
-        return d.date;
+    const formatted = data.map((d) => ({
+      ...d,
+      futures: futuresMap.get(d.date) ?? null,
+      label: (() => {
+        try {
+          return format(new Date(d.date), labelFormat, { locale: de });
+        } catch {
+          return d.date;
+        }
+      })(),
+    }));
+
+    const allValues = [
+      ...data.map((d) => d.close),
+      ...futuresData.map((d) => d.close),
+    ].filter((v) => v > 0);
+
+    const minVal = allValues.length ? Math.min(...allValues) - 1 : 0;
+    const maxVal = allValues.length ? Math.max(...allValues) + 1 : 100;
+
+    // Build evenly-spaced tick dates (~5 visible) using unique labels as anchors
+    const TARGET_TICKS = 5;
+    const uniqueLabelDates: string[] = [];
+    const seenLabels = new Set<string>();
+    for (const d of formatted) {
+      if (d.label && !seenLabels.has(d.label)) {
+        seenLabels.add(d.label);
+        uniqueLabelDates.push(d.date);
       }
-    })(),
-  }));
-
-  const allValues = [
-    ...data.map((d) => d.close),
-    ...futuresData.map((d) => d.close),
-  ].filter((v) => v > 0);
-
-  const minVal = allValues.length ? Math.min(...allValues) - 1 : 0;
-  const maxVal = allValues.length ? Math.max(...allValues) + 1 : 100;
-
-  // Build evenly-spaced tick dates (~5 visible) using unique labels as anchors
-  const TARGET_TICKS = 5;
-  const uniqueLabelDates: string[] = [];
-  const seenLabels = new Set<string>();
-  for (const d of formatted) {
-    if (d.label && !seenLabels.has(d.label)) {
-      seenLabels.add(d.label);
-      uniqueLabelDates.push(d.date);
     }
-  }
-  const tickStep = Math.max(1, Math.floor(uniqueLabelDates.length / TARGET_TICKS));
-  const visibleTicks: string[] = [];
-  for (let i = 0; i < uniqueLabelDates.length; i += tickStep) {
-    visibleTicks.push(uniqueLabelDates[i]);
-  }
-  if (uniqueLabelDates.length > 0) {
-    const last = uniqueLabelDates[uniqueLabelDates.length - 1];
-    if (visibleTicks[visibleTicks.length - 1] !== last) visibleTicks.push(last);
-  }
+    const tickStep = Math.max(1, Math.floor(uniqueLabelDates.length / TARGET_TICKS));
+    const visibleTicks: string[] = [];
+    for (let i = 0; i < uniqueLabelDates.length; i += tickStep) {
+      visibleTicks.push(uniqueLabelDates[i]);
+    }
+    if (uniqueLabelDates.length > 0) {
+      const last = uniqueLabelDates[uniqueLabelDates.length - 1];
+      if (visibleTicks[visibleTicks.length - 1] !== last) visibleTicks.push(last);
+    }
+
+    return { formatted, minVal, maxVal, visibleTicks };
+  }, [data, futuresData, labelFormat]);
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -182,6 +187,7 @@ export function VixHistoryChart({
           dot={false}
           activeDot={{ r: 4, fill: "#B8E15A", stroke: "#0C0C0F", strokeWidth: 2 }}
           connectNulls
+          isAnimationActive={false}
         />
         {/* VIX 3M (futures proxy) — line only, amber */}
         {futuresData.length > 0 && (
@@ -193,9 +199,12 @@ export function VixHistoryChart({
             dot={false}
             activeDot={{ r: 4, fill: "#F59E0B", stroke: "#0C0C0F", strokeWidth: 2 }}
             connectNulls
+            isAnimationActive={false}
           />
         )}
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
+
+export const VixHistoryChart = memo(VixHistoryChartInner);
