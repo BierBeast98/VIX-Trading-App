@@ -25,6 +25,7 @@ model Settings {
   barrierWarningPct  Float    @default(10.0)
   spikeThresholdPct  Float    @default(15.0)
   vontobelIsin       String   @default("DE000VJ4MNF2")
+  alertConfig        Json     @default("{}")
   updatedAt          DateTime @updatedAt
 }
 
@@ -84,11 +85,25 @@ model AlertLog {
   alertType    String
   message      String
   vixLevel     Float?
+  urgency      String   @default("medium")
+  dedupeKey    String?
   sentAt       DateTime @default(now())
   acknowledged Boolean  @default(false)
 
   @@index([sentAt])
   @@index([alertType])
+}
+
+// Arm/Re-Arm-Zustand pro Alert-Bedingung (key = dedupeKey, z.B. "profitTarget:DE000VY6F1Z4").
+// AlertLog protokolliert nur Sendungen; hier steht, ob eine Bedingung gerade aktiv ist,
+// damit Alerts nur beim Eintreten + max. 1x täglich als Erinnerung feuern.
+model AlertState {
+  key          String    @id
+  active       Boolean   @default(false)
+  since        DateTime  @default(now())
+  lastFiredAt  DateTime?
+  lastFiredDay String    @default("")
+  updatedAt    DateTime  @updatedAt
 }
 
 model VixCache {
