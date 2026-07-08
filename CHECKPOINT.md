@@ -282,12 +282,30 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 
 **Bewusst NICHT gemacht (Overkill für Single-User):** Listen-Virtualisierung, Redis, RSC/SSR-Umbau, Recharts-Ersatz, WebSockets. In-Memory-Cache (`lib/server-cache.ts`) ist prozesslokal — ok für Single-Instance Hostinger.
 
+### Session 10 (2026-07-08) — Vontobel-API-Fix + Alert-System-Überarbeitung
+
+**Vontobel-Fix (Commit `d05d43e`):** Vontobel hat die Chart-API geändert — `/detail/0/0` → `/detail/{range}` (ein Parameter). Alle 6 Abrufstellen angepasst (lib/yahoo-finance.ts ×3, vontobel/batch, price, product). Live-Bid/Intraday kamen seitdem nicht mehr an (Positionen zeigten stale Einstiegspreis). Widget-API + Scriptable zeigen jetzt zusätzlich **€-P&L** (`pnlEur`, Stückzahl aus offenen Trades).
+
+**Alert-Überarbeitung (Commits `3d5a5f0`, `d7d7eee`, `d8c4b2c`):**
+- **Schema (additiv, via `prisma db push`):** `Settings.alertConfig` (Json: per-Typ enabled + profitTargetPct), `AlertLog.urgency`/`dedupeKey`, neues Model `AlertState` (Arm/Re-Arm-Zustand pro Bedingung).
+- **Arm/Re-Arm-Zustandsmaschine** (`lib/alert-dispatch.ts`): Alert feuert 1× beim Eintreten, max. 1 „Erinnerung:"-Mail pro Handelstag (Berlin), Re-Arm beim Verlassen; 30-Min-Anti-Flap pro dedupeKey. Ersetzt den globalen Typ-Cooldown (der bei mehreren Positionen Alerts verschluckte).
+- **Neuer Alert-Typ `profitTarget`** (Default 15 %, pro Position, dedupeKey `profitTarget:<certId>`).
+- **Spike-Split:** Spot = `spike`, Futures = `vxSpike` — blockieren sich nicht mehr.
+- **calcStepFloor-Fix:** Trailing Stop aktiviert bei exakt `targetReturnPct` (18 statt 23); Floor-Writes nur für tatsächlich gesendete Edge-Alerts.
+- **Weitere Fixes:** Event-Zeiten in Europe/Berlin geparst (`berlinDateTime` in lib/trading-hours.ts), genau 1 Mail pro Event; Stale-Guard (Spot/Bid >30 Min alt → keine Alerts); `?test=true`-Auth-Bypass entfernt, neu `?force` (Handelszeit-Gate) + `?dryRun` (schreibfrei), beide mit Bearer.
+- **Frontend:** Alerts-Seite = Kommandozentrale (6 Config-Karten: Toggle + Schwellen + „Zuletzt ausgelöst" + Aktiv-Punkt via neuem `GET /api/alerts/summary`; Verlauf mit echten Urgency-Badges). Settings-Seite nur noch E-Mail + ISIN. `PUT /api/settings` Zod-validiert (400 bei ungültigen Werten). Zentrale Typ-Metadaten in `lib/alert-types.ts`.
+- **Verifiziert:** Alle Zustandsmaschinen-Zweige end-to-end gegen Prod (Initial/Suppress/Erinnerung/Re-Arm), Auth-Checks, Dry-Run schreibfrei, UI via Preview. Live bestätigt nach Deploy (~17 Min Hostinger-Build).
+- **Cron läuft:** Hostinger-Cron feuert nachweislich (Log 12:02 Uhr exakt nach Cooldown-Ablauf). Wichtig: Er MUSS `Authorization: Bearer <CRON_SECRET>` senden — Bypass existiert nicht mehr.
+- **Nutzer-Settings:** vixLowThreshold **16**, profitTarget **15 %**, Zielrendite 18 %/Stufe 5 %, Spike 4,5 %.
+- Hinweis: Position DE000VY6F1Z4 wurde am 08.07. ~11:10 vom Nutzer geschlossen (+12 %); Gewinnziel-Alert daher ohne echte Position getestet (Codepfad = verifizierter Trailing-Pfad).
+
 ### Offene Punkte / Nächste Schritte
-- **Auf echtem iPhone gegentesten** (https://vix-trading.de): Scroll-Gefühl + Seitenwechsel nach den Perf-Fixes, Position schließen, Widget (inkl. `~`-Stale-Anzeige falls Vontobel mal ausfällt).
-- **Datenentscheid offen:** Trade `DE000VU4MAY5` — Ein-/Ausstiegsdatum vertauscht (−14 Tage). Auf Wunsch tauschen (→ 14 Tage) oder korrekte Daten setzen.
-- `/api/vontobel/intraday?isin=DE000VJ4MNF2` lieferte nach Handelsschluss `[]` — während Handelszeiten (08–22 CET) gegenprüfen; echte Fehler wären jetzt in den Hostinger-Logs sichtbar (neues Logging).
+- **Gewinnziel-Alert an echter Position beobachten:** Beim nächsten offenen Trade prüfen, dass bei +15 % die Mail kommt (Codepfad verifiziert, aber noch nie mit echter Position gefeuert).
+- **Ersten Handelstag nach Deploy beobachten:** Kein Alert-Spam mehr (max. 1× + Tages-Erinnerung), AlertState-Verhalten im Verlauf prüfen.
+- **Widget-€-Anzeige auf dem iPhone bestätigen** (pnlEur unter der Prozentzahl — braucht offene Position).
+- **Datenentscheid offen:** Trade `DE000VU4MAY5` — Ein-/Ausstiegsdatum vertauscht (−14 Tage). Auf Wunsch tauschen oder korrekte Daten setzen.
 - Optional: Widget-Dateiname `Untitled Script.js` umbenennen (z.B. `VIX Dashboard.js`).
 
 ---
 
-*Zuletzt aktualisiert: 2026-07-01 (Session 9)*
+*Zuletzt aktualisiert: 2026-07-08 (Session 10)*
