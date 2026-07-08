@@ -5,7 +5,8 @@ import { z } from "zod";
 // hier liegen nur die Ein/Aus-Flags + Werte, für die es keine Spalte gibt.
 // Ein leeres {} bedeutet: alles aktiviert, profitTargetPct 15 (Defaults greifen).
 
-export interface AlertConfig {
+// type statt interface: implizite Index-Signatur → direkt als Prisma-Json speicherbar
+export type AlertConfig = {
   entry: { enabled: boolean };
   stddev: { enabled: boolean };
   spike: { enabled: boolean }; // VIX Spot
@@ -13,7 +14,7 @@ export interface AlertConfig {
   profitTarget: { enabled: boolean; thresholdPct: number };
   event: { enabled: boolean };
   // trailingStop wird weiterhin über Settings.trailingStopConfig gesteuert (keine Duplizierung)
-}
+};
 
 export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   entry: { enabled: true },

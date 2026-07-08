@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatPct, formatDateTime } from "@/lib/utils";
 import { getRefreshInterval } from "@/lib/trading-hours";
+import { ALERT_TYPE_META, type AlertType } from "@/lib/alert-types";
 
 // Recharts (~200 KB) aus dem Seiten-Bundle halten — Charts laden nach der Hydration nach.
 // Platzhalter mit fixer Höhe verhindern Layout-Shift beim Nachladen.
@@ -967,10 +968,9 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-2 max-h-[240px] overflow-y-auto">
                 {alerts.slice(0, 8).map((alert) => {
-                  const typeColors: Record<string, string> = { entry: "#B8E15A", stddev: "#F59E0B", spike: "#FF4D4D", trailingStop: "#3B82F6", event: "#8B5CF6" };
                   return (
                     <div key={alert.id} className="flex gap-3 p-2.5 rounded-lg" style={{ background: "#1A1A22" }}>
-                      <div className="mt-0.5 h-2 w-2 rounded-full flex-shrink-0" style={{ background: typeColors[alert.alertType] ?? "#8B8FA8" }} />
+                      <div className="mt-0.5 h-2 w-2 rounded-full flex-shrink-0" style={{ background: ALERT_TYPE_META[alert.alertType as AlertType]?.color ?? "#8B8FA8" }} />
                       <div className="min-w-0">
                         <p className="text-xs text-white leading-snug line-clamp-2">{alert.message}</p>
                         <p className="text-xs mt-0.5" style={{ color: "#4A4A5A" }}>{formatDateTime(alert.sentAt)}</p>
