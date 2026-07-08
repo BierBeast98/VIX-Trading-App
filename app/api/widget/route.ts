@@ -54,6 +54,11 @@ export async function GET() {
           currentPrice: true,
           direction: true,
           entryVix: true,
+          // Stückzahl der offenen Trades für €-P&L (quantity liegt am Trade, nicht an der Position)
+          trades: {
+            where: { exitDate: null },
+            select: { quantity: true },
+          },
         },
       }),
     ]);
@@ -127,11 +132,19 @@ export async function GET() {
           : ((currentPrice - p.entryPrice) / p.entryPrice) * 100
         : 0;
     const pnlPct = parseFloat(rawPnl.toFixed(2));
+    const quantity = p.trades.reduce((sum, t) => sum + (t.quantity ?? 0), 0);
+    const rawPnlEur =
+      quantity > 0
+        ? (p.direction === "short"
+            ? p.entryPrice - currentPrice
+            : currentPrice - p.entryPrice) * quantity
+        : null;
     return {
       name: p.name || p.direction,
       entryPrice: parseFloat(p.entryPrice.toFixed(4)),
       currentPrice: parseFloat(currentPrice.toFixed(4)),
       pnlPct,
+      pnlEur: rawPnlEur != null ? parseFloat(rawPnlEur.toFixed(2)) : null,
       priceStale,
       direction: p.direction,
     };

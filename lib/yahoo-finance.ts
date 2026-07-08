@@ -233,7 +233,8 @@ interface VontobelSeries {
 export async function getVixFuturesIntraday(isin?: string): Promise<HistoricalPoint[]> {
   const vontobelIsin = isin || DEFAULT_VONTOBEL_ISIN;
   try {
-    const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0/0?c=de-de`;
+    // Vontobel API-Änderung 2026-07: nur noch EIN Range-Parameter (/detail/{range})
+    const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0?c=de-de`;
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -272,7 +273,7 @@ export async function getVixFuturesIntraday(isin?: string): Promise<HistoricalPo
 export async function getVontobelCertificateIntraday(isin?: string): Promise<HistoricalPoint[]> {
   const vontobelIsin = isin || DEFAULT_VONTOBEL_ISIN;
   try {
-    const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0/0?c=de-de`;
+    const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0?c=de-de`;
     const res = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -318,7 +319,7 @@ export async function getVontobelCertificatePrice(
 ): Promise<number | null> {
   try {
     const resp = await fetch(
-      `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0/0?c=de-de`,
+      `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
       {
         headers: {
           "User-Agent":

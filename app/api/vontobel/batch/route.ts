@@ -45,7 +45,7 @@ async function getPrice(isin: string): Promise<object> {
   // 3. Fresh fetch from Vontobel chart API
   try {
     const resp = await fetch(
-      `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0/0?c=de-de`,
+      `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
       { headers: FETCH_HEADERS, next: { revalidate: 0 } }
     );
     if (!resp.ok) {

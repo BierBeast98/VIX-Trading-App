@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
         { headers: HEADERS, next: { revalidate: 0 } }
       ),
       fetch(
-        `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0/0?c=de-de`,
+        `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
         {
           headers: { ...HEADERS, Accept: "application/json, text/plain, */*" },
           next: { revalidate: 0 },
