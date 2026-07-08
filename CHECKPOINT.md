@@ -298,6 +298,7 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - **Cron läuft:** Hostinger-Cron feuert nachweislich (Log 12:02 Uhr exakt nach Cooldown-Ablauf). Wichtig: Er MUSS `Authorization: Bearer <CRON_SECRET>` senden — Bypass existiert nicht mehr.
 - **Nutzer-Settings:** vixLowThreshold **16**, profitTarget **15 %**, Zielrendite 18 %/Stufe 5 %, Spike 4,5 %.
 - Hinweis: Position DE000VY6F1Z4 wurde am 08.07. ~11:10 vom Nutzer geschlossen (+12 %); Gewinnziel-Alert daher ohne echte Position getestet (Codepfad = verifizierter Trailing-Pfad).
+- **Nachfix (`8b7a525`):** rollingWindowDays-Validierung bis 1000 Tage (Nutzer nutzt 600; Speichern schlug live mit 400 fehl). Live verifiziert.
 
 ### Offene Punkte / Nächste Schritte
 - **Gewinnziel-Alert an echter Position beobachten:** Beim nächsten offenen Trade prüfen, dass bei +15 % die Mail kommt (Codepfad verifiziert, aber noch nie mit echter Position gefeuert).
