@@ -63,13 +63,13 @@ export function calcSharpeRatio(returns: number[], riskFreeRate = 0): number {
   return (mean - riskFreeRate) / std;
 }
 
+// Floor aktiviert bei exakt targetReturn (18 → Floor 18) und steigt pro voller Stufe mit
+// (22.9 → 18, 23 → 23 bei step 5)
 export function calcStepFloor(
   targetReturn: number,
   stepPct: number,
   currentPnl: number
 ): number | null {
-  if (stepPct <= 0) return null;
-  const stepsAbove = Math.floor((currentPnl - targetReturn) / stepPct);
-  if (stepsAbove < 1) return null;
-  return targetReturn + (stepsAbove - 1) * stepPct;
+  if (stepPct <= 0 || currentPnl < targetReturn) return null;
+  return targetReturn + Math.floor((currentPnl - targetReturn) / stepPct) * stepPct;
 }

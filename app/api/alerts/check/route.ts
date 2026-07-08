@@ -4,27 +4,35 @@ import { getVixSpot, getVontobelFuturesQuote } from "@/lib/yahoo-finance";
 import {
   checkVixEntry,
   checkStdDevAlert,
+  checkSpotSpike,
   checkVixSpike,
+  checkProfitTarget,
   checkTrailingStop,
   type AlertSettings,
-  type AlertResult,
 } from "@/lib/alert-engine";
-import { sendAlertEmail } from "@/lib/resend";
+import { dispatchAlerts, type Evaluation } from "@/lib/alert-dispatch";
+import { normalizeAlertConfig } from "@/lib/alert-config";
 import { getEventsWithin2Hours } from "@/lib/economic-calendar";
 import { isWithinTradingHours } from "@/lib/trading-hours";
 
+// Quotes/Bids älter als 30 Min gelten als stale — keine Alerts auf veralteten Daten
+const STALE_MS = 30 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
-  // Verify cron secret
+  // Bearer-Auth ist IMMER Pflicht (der frühere ?test=true-Bypass ist entfernt).
+  // ?force=true  → Handelszeit-Gate umgehen
+  // ?dryRun=true → komplett schreibfrei: keine Mails, kein AlertLog/AlertState, keine Floor-Writes
   const authHeader = req.headers.get("authorization");
-  const testMode = new URL(req.url).searchParams.get("test") === "true";
-
-  if (!testMode && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const params = new URL(req.url).searchParams;
+  const force = params.get("force") === "true";
+  const dryRun = params.get("dryRun") === "true";
+
   // Skip outside trading hours (07:00–22:30 CET/CEST) — VIX certificates illiquid outside window
-  if (!testMode && !isWithinTradingHours()) {
+  if (!force && !isWithinTradingHours()) {
     return NextResponse.json({ message: "Outside trading hours (07:00–22:30 CET)" });
   }
 
@@ -45,8 +53,7 @@ export async function GET(req: NextRequest) {
         stepPct: number;
       },
     };
-
-    const triggered: AlertResult[] = [];
+    const config = normalizeAlertConfig(settings.alertConfig);
 
     // Externe Quellen + DB-Reads parallel statt sequenziell
     const vontobelIsin = settings.vontobelIsin || undefined;
@@ -60,9 +67,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: "VIX data unavailable" });
     }
 
-    // Gecachte Bids für alle offenen Positionen in EINEM Query
-    // (statt zwei findUnique-Runden pro Position für Spike + Trailing Stop)
-    const bidByCert = new Map<string, number | null>();
+    const now = Date.now();
+    const staleSpot = spot.timestamp > 0 && now - spot.timestamp > STALE_MS;
+
+    // Gecachte Bids für alle offenen Positionen in EINEM Query (inkl. Frische-Check)
+    const bidByCert = new Map<string, { bid: number | null; fresh: boolean }>();
     if (positions.length > 0) {
       try {
         const rows = await prisma.vixCache.findMany({
@@ -70,40 +79,46 @@ export async function GET(req: NextRequest) {
         });
         for (const row of rows) {
           const bid = (row.data as { bid?: number | null }).bid ?? null;
-          bidByCert.set(row.id.replace(/^vontobel_/, ""), bid);
+          const fresh = now - row.updatedAt.getTime() <= STALE_MS;
+          bidByCert.set(row.id.replace(/^vontobel_/, ""), { bid, fresh });
         }
       } catch (e) {
         console.error("[alerts/check] bid cache read:", e);
       }
     }
 
-    // Entry alerts
-    const entryAlert = checkVixEntry(spot.price, alertSettings);
-    if (entryAlert) triggered.push(entryAlert);
+    // Für JEDEN überwachten Key eine Evaluation — auch wenn die Bedingung false ist,
+    // sonst kann dispatchAlerts nie re-armen.
+    const evaluations: Evaluation[] = [];
 
-    // Std dev alert — use rolling window from settings
-    if (histCache) {
-      const allCloses = (histCache.data as { closes: number[] }).closes || [];
-      const windowCloses = allCloses.slice(-settings.rollingWindowDays);
-      const stdAlert = checkStdDevAlert(windowCloses, spot.price, alertSettings);
-      if (stdAlert) triggered.push(stdAlert);
+    // Entry + Std-Dev + Spot-Spike nur mit frischem Spot bewerten
+    if (!staleSpot) {
+      if (config.entry.enabled) {
+        evaluations.push({ key: "entry", alert: checkVixEntry(spot.price, alertSettings) });
+      }
+
+      if (config.stddev.enabled && histCache) {
+        const allCloses = (histCache.data as { closes: number[] }).closes || [];
+        const windowCloses = allCloses.slice(-settings.rollingWindowDays);
+        const stdAlert = checkStdDevAlert(windowCloses, spot.price, alertSettings);
+        evaluations.push(
+          { key: "stddev:above", alert: stdAlert?.dedupeKey === "stddev:above" ? stdAlert : null },
+          { key: "stddev:below", alert: stdAlert?.dedupeKey === "stddev:below" ? stdAlert : null }
+        );
+      }
+
+      if (config.spike.enabled) {
+        const spikeAlert = checkSpotSpike(spot, alertSettings);
+        evaluations.push(
+          { key: "spike:up", alert: spikeAlert?.dedupeKey === "spike:up" ? spikeAlert : null },
+          { key: "spike:down", alert: spikeAlert?.dedupeKey === "spike:down" ? spikeAlert : null }
+        );
+      }
     }
 
-    // VIX Spot Spike (Yahoo Finance — already fetched, most reliable source for VIX)
-    if (Math.abs(spot.changePct) >= alertSettings.spikeThresholdPct) {
-      const dir = spot.changePct > 0 ? "gestiegen" : "gefallen";
-      triggered.push({
-        type: "spike",
-        message: `VIX Spike: ${spot.changePct >= 0 ? "+" : ""}${spot.changePct.toFixed(1)}% ${dir} (${spot.previousClose.toFixed(2)} → ${spot.price.toFixed(2)})`,
-        vixLevel: spot.price,
-        urgency: spot.changePct > 0 ? "high" : "medium",
-        details: { source: "spot", changePct: spot.changePct, previousClose: spot.previousClose, price: spot.price },
-      });
-    }
-
-    // VX Futures Spike (Vontobel) — unabhängig von offenen Positionen
-    if (futureQuote && futureQuote.previousClose > 0) {
-      const spikeAlert = checkVixSpike(
+    // VX-Futures-Spike (Vontobel-Quote hat eigenen Timestamp aus dem Seiten-Scrape)
+    if (config.vxSpike.enabled && futureQuote && futureQuote.previousClose > 0) {
+      const vxAlert = checkVixSpike(
         futureQuote.price,
         futureQuote.previousClose,
         positions.map((p) => ({
@@ -113,21 +128,45 @@ export async function GET(req: NextRequest) {
           entryPrice: p.entryPrice,
           currentBarrier: p.currentBarrier,
           leverageRatio: p.leverageRatio,
-          currentBid: bidByCert.get(p.certificateId) ?? null,
+          currentBid: bidByCert.get(p.certificateId)?.bid ?? null,
         })),
         alertSettings
       );
-      if (spikeAlert) triggered.push(spikeAlert);
+      evaluations.push(
+        { key: "vxSpike:up", alert: vxAlert?.dedupeKey === "vxSpike:up" ? vxAlert : null },
+        { key: "vxSpike:down", alert: vxAlert?.dedupeKey === "vxSpike:down" ? vxAlert : null }
+      );
     }
 
-    // Trailing Stop — Bids kommen aus dem bereits geladenen bidByCert-Batch
-    if (positions.length > 0 && alertSettings.trailingStopConfig.enabled) {
-      const tsResults = positions.map((p) => {
-        const bid = bidByCert.get(p.certificateId) ?? null;
-        if (bid == null || p.entryPrice <= 0) return null;
+    // Positions-Alerts (Gewinnziel + Trailing Stop) — nur mit frischem Bid;
+    // bei stale Bid keine Evaluation (weder feuern noch fälschlich re-armen)
+    const floorUpdates = new Map<string, { positionId: string; newFloor: number; newPeakPnlPct: number }>();
+    for (const p of positions) {
+      const cached = bidByCert.get(p.certificateId);
+      if (!cached || cached.bid == null || !cached.fresh || p.entryPrice <= 0) continue;
 
-        const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
-        const tsResult = checkTrailingStop(
+      const bid = cached.bid;
+      const currentPnlPct = ((bid - p.entryPrice) / p.entryPrice) * 100;
+
+      if (config.profitTarget.enabled) {
+        evaluations.push({
+          key: `profitTarget:${p.certificateId}`,
+          alert: checkProfitTarget(
+            {
+              positionId: p.id,
+              certificateId: p.certificateId,
+              direction: p.direction,
+              entryPrice: p.entryPrice,
+              currentBid: bid,
+              currentPnlPct,
+            },
+            config.profitTarget.thresholdPct
+          ),
+        });
+      }
+
+      if (alertSettings.trailingStopConfig.enabled) {
+        const ts = checkTrailingStop(
           {
             positionId: p.id,
             certificateId: p.certificateId,
@@ -139,68 +178,80 @@ export async function GET(req: NextRequest) {
           },
           alertSettings
         );
-        return tsResult ? { alert: tsResult.alert, positionId: p.id, newFloor: tsResult.newFloor, newPeakPnlPct: tsResult.newPeakPnlPct } : null;
-      });
+        // Breach ist eine Dauerbedingung mit Re-Arm; activated/raised sind Edge-Events
+        const breachKey = `trailingStopBreach:${p.certificateId}`;
+        if (ts?.alert.edge) {
+          evaluations.push({ key: ts.alert.dedupeKey, alert: ts.alert });
+          evaluations.push({ key: breachKey, alert: null });
+          floorUpdates.set(ts.alert.dedupeKey, {
+            positionId: p.id,
+            newFloor: ts.newFloor,
+            newPeakPnlPct: ts.newPeakPnlPct,
+          });
+        } else {
+          evaluations.push({ key: breachKey, alert: ts?.alert ?? null });
+        }
+      }
+    }
 
-      // Apply position updates in parallel for all triggered trailing stops
-      const updates = tsResults.filter((r): r is NonNullable<typeof r> => r !== null);
-      triggered.push(...updates.map((r) => r.alert));
+    // Wirtschaftsevents (2h-Vorwarnung) — genau 1 Mail pro Event, keine Tages-Erinnerung
+    if (config.event.enabled) {
+      for (const event of getEventsWithin2Hours()) {
+        evaluations.push({
+          key: `event:${event.id}`,
+          remindDaily: false,
+          alert: {
+            type: "event",
+            dedupeKey: `event:${event.id}`,
+            message: `Bevorstehendes Event in <2 Stunden: ${event.title} (${event.time} Uhr)`,
+            urgency: event.impact === "high" ? "high" : "medium",
+            details: { event },
+          },
+        });
+      }
+    }
+
+    const { sent, suppressed } = await dispatchAlerts(evaluations, {
+      email: settings.alertEmail,
+      vixLevel: spot.price,
+      dryRun,
+    });
+
+    // Trailing-Floor nur persistieren, wenn der zugehörige Edge-Alert wirklich gesendet wurde —
+    // sonst laufen DB-Zustand und Benachrichtigungen auseinander
+    if (!dryRun) {
+      const sentFloorUpdates = sent
+        .map((a) => floorUpdates.get(a.dedupeKey))
+        .filter((u): u is NonNullable<typeof u> => u != null);
       await Promise.all(
-        updates.map((r) =>
+        sentFloorUpdates.map((u) =>
           prisma.position.update({
-            where: { id: r.positionId },
-            data: { trailingStopFloor: r.newFloor, peakPnlPct: r.newPeakPnlPct },
+            where: { id: u.positionId },
+            data: { trailingStopFloor: u.newFloor, peakPnlPct: u.newPeakPnlPct },
           })
         )
       );
     }
 
-    // Economic event alerts (2h warning)
-    const upcomingEvents = getEventsWithin2Hours();
-    for (const event of upcomingEvents) {
-      triggered.push({
-        type: "event",
-        message: `Bevorstehendes Event in <2 Stunden: ${event.title} (${event.time} Uhr)`,
-        urgency: event.impact === "high" ? "high" : "medium",
-        details: { event },
-      });
-    }
-
-    // Send emails and log — with 30-min cooldown per alert type
-    // Cooldown-Typen in EINEM Query laden statt einer Abfrage pro Alert
-    const cooldownCutoff = new Date(Date.now() - 30 * 60 * 1000);
-    const typesOnCooldown = new Set(
-      (
-        await prisma.alertLog.findMany({
-          where: { sentAt: { gte: cooldownCutoff } },
-          select: { alertType: true },
-        })
-      ).map((r) => r.alertType)
-    );
-
-    const sent: AlertResult[] = [];
-    for (const alert of triggered) {
-      if (typesOnCooldown.has(alert.type)) continue;
-      typesOnCooldown.add(alert.type); // verhindert Doppel-Versand desselben Typs im selben Lauf
-      if (settings.alertEmail) {
-        await sendAlertEmail(alert, settings.alertEmail);
-      }
-      await prisma.alertLog.create({
-        data: {
-          alertType: alert.type,
-          message: alert.message,
-          vixLevel: spot.price,
-        },
-      });
-      sent.push(alert);
-    }
-
+    const triggered = evaluations.filter((e) => e.alert != null);
     return NextResponse.json({
       checked: true,
+      dryRun,
       vix: spot.price,
+      staleSpot,
       alertsTriggered: triggered.length,
       alertsSent: sent.length,
-      alerts: triggered.map((a) => ({ type: a.type, message: a.message, sent: sent.includes(a) })),
+      alerts: triggered.map((e) => {
+        const wasSent = sent.some((s) => s.dedupeKey === e.key);
+        const sup = suppressed.find((s) => s.alert.dedupeKey === e.key);
+        return {
+          type: e.alert!.type,
+          dedupeKey: e.key,
+          message: e.alert!.message,
+          sent: wasSent,
+          suppressedReason: sup?.reason ?? null,
+        };
+      }),
       timestamp: new Date().toISOString(),
     });
   } catch (err) {

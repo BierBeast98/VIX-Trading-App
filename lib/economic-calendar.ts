@@ -1,3 +1,5 @@
+import { berlinDateTime } from "./trading-hours";
+
 export interface EconomicEvent {
   id: string;
   date: string;
@@ -262,7 +264,8 @@ export function getEventsWithin2Hours(): EconomicEvent[] {
 
   return CALENDAR_2026.filter((e) => {
     if (!e.time) return false;
-    const eventDate = new Date(`${e.date}T${e.time}:00`);
+    // Event-Zeiten sind Berlin-Wanduhrzeit — nicht in Server-Zeitzone parsen
+    const eventDate = berlinDateTime(e.date, e.time);
     return eventDate >= now && eventDate <= twoHoursLater;
   });
 }

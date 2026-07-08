@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import type { AlertResult } from "./alert-engine";
+import { ALERT_TYPE_META } from "./alert-types";
 
 function getResend(): Resend {
   const key = process.env.RESEND_API_KEY;
@@ -21,13 +22,7 @@ export async function sendAlertEmail(alert: AlertResult, toEmail: string): Promi
       low: "NIEDRIG",
     }[alert.urgency];
 
-    const typeLabel = {
-      entry: "Einstiegs-Alert",
-      event: "Event-Alert",
-      spike: "VIX-Spike-Alert",
-      trailingStop: "Trailing Stop Alert",
-      stddev: "Statistischer Alert",
-    }[alert.type];
+    const typeLabel = ALERT_TYPE_META[alert.type]?.emailLabel ?? alert.type;
 
     await getResend().emails.send({
       from: "VIX Trading <onboarding@resend.dev>",
