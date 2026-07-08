@@ -30,7 +30,7 @@ const settingsSchema = z
     vixLowThreshold: z.number().min(5).max(50),
     vixHighThreshold: z.number().min(10).max(100),
     stdDevMultiplier: z.number().min(0.5).max(5),
-    rollingWindowDays: z.number().int().min(5).max(250),
+    rollingWindowDays: z.number().int().min(5).max(1000),
     targetReturnPct: z.number().min(1).max(200),
     trailingStopConfig: z.object({
       enabled: z.boolean(),
