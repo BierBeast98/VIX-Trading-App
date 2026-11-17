@@ -1,3 +1,5 @@
+import { fetchMassiveVix } from './vix-feed';
+import { VixFeedError, type FeedMode, type VixFeedSource } from './vix-feed-model';
 import { trackedYahoo, trackedVontobel } from './archive/capture';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // yahoo-finance2 v3: must instantiate with new YahooFinance()
@@ -16,6 +18,12 @@ export interface VixQuote {
   fiftyTwoWeekHigh: number;
   fiftyTwoWeekLow: number;
   timestamp: number;
+  source?: VixFeedSource;
+  feedMode?: FeedMode;
+  receivedAt?: number;
+  delayMinutes?: number | null;
+  marketStatus?: string;
+  feedError?: string;
 }
 
 export interface HistoricalPoint {
@@ -56,8 +64,20 @@ export async function getEurUsd(): Promise<number> {
   return quote?.price ?? 1.09;
 }
 
-export async function getVixSpot(): Promise<VixQuote | null> {
-  return fetchQuote("^VIX");
+export async function getVixSpot(options: { allowRealtime?: boolean } = {}): Promise<VixQuote | null> {
+  const key = process.env.MASSIVE_API_KEY?.trim();
+  const provider = options.allowRealtime === false ? 'yahoo' : process.env.VIX_DATA_PROVIDER?.trim() || (key ? 'massive' : 'yahoo');
+  let feedError: string | undefined;
+  if (provider === 'massive') {
+    if (!key) feedError = 'provider_key_missing';
+    else {
+      try { return await fetchMassiveVix(key); }
+      catch (error) { feedError = error instanceof VixFeedError ? error.code : 'provider_unavailable'; }
+    }
+  } else if (provider !== 'yahoo') feedError = 'provider_configuration_invalid';
+  // The fallback remains visible for context, but is never certified for live entry signals.
+  const quote = await fetchQuote('^VIX');
+  return quote ? { ...quote, source: 'yahoo', feedMode: 'delayed', delayMinutes: 15, receivedAt: Date.now(), feedError } : null;
 }
 
 /** VIX 3-Month index (^VIX3M) as futures proxy — best freely available via Yahoo Finance */

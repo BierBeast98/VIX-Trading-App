@@ -5,7 +5,7 @@ export type Config = {
   productVerified: boolean; barrier: number; email: boolean; telegram: boolean;
   broker: string; opensAt: string; closesAt: string; closedDates: string[];
 };
-export type Quote = { isin: string; at: string; vix: number | null; vixAt: string | null;
+export type Quote = { isin: string; at: string; vix: number | null; vixAt: string | null; vixRealtime?: boolean; vixSource?: string; vixFeedError?: string;
   future: number | null; futureAt: string | null; bid: number | null; ask: number | null;
   productAt: string | null; askAt?: string | null; productValid?: boolean; error?: string };
 export type Lot = { id: string; quantity: number; originalQuantity: number; cost: number;
@@ -65,7 +65,7 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
   const cfg = s.round?.config ?? s.config;
   if (!marketOpen(s.config, now)) { s.health = 'Handelsfenster geschlossen oder Brokerzeiten noch nicht eingerichtet'; return s; }
   if (quote.isin !== cfg.isin) { s.health = 'Produktwechsel während Kursabruf; erneute Prüfung erforderlich'; return s; }
-  const goodSpot = positive(quote.vix) && fresh(quote.vixAt, now);
+  const goodSpot = quote.vixRealtime === true && positive(quote.vix) && fresh(quote.vixAt, now);
   const goodBid = positive(quote.bid) && fresh(quote.productAt, now);
   const previous = s.previousVix;
   const previousAt = s.previousVixAt;
@@ -118,6 +118,7 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
   } else if (pending) { s.health = 'Kaufsignal wartet auf Bestätigung'; return s; }
   if (!cfg.productVerified || !cfg.isin || !cfg.futureSymbol || !cfg.futureName || !cfg.futureExpiry || cfg.barrier <= 0) { s.health = 'Long-Zertifikat und VX-Basisvertrag müssen geprüft und hinterlegt werden'; return s; }
   if (quote.productValid === false) { s.health = quote.error ?? 'Produktprüfung fehlgeschlagen'; return s; }
+  if (quote.vixRealtime !== true) { s.health = 'Kauf blockiert: VIX-Echtzeitfeed fehlt, ist verzögert oder nicht freigegeben'; return s; }
   if (!goodSpot || !goodBid || !positive(quote.ask) || !fresh(quote.askAt ?? quote.productAt, now) || quote.ask < quote.bid!) { s.health = quote.error ?? 'Kauf blockiert: frische VIX-, Geld- und Briefkurse erforderlich'; return s; }
   if (!positive(quote.future) || !fresh(quote.futureAt, now)) { s.health = 'Kauf blockiert: kein frischer Kurs des tatsächlichen VX-Basisvertrags'; return s; }
   if ((Date.parse(cfg.futureExpiry + 'T00:00:00Z') - now.getTime()) / 86400000 < 30) { s.health = 'Kauf blockiert: VX-Restlaufzeit unter 30 Tagen'; return s; }

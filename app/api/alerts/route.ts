@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { allowed } from '@/lib/signals/auth';
 import { prisma } from "@/lib/prisma";
 
 export async function GET(req: NextRequest) {
+  if (!allowed(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   try {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get("type");
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
       where: { acknowledged: false },
     });
 
-    return NextResponse.json({ alerts, unacknowledgedCount });
+    return NextResponse.json({ alerts, unacknowledgedCount }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ alerts: [], unacknowledgedCount: 0 });
   }

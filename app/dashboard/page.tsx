@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { VixFeedStatus, type VixFeedQuote } from "@/components/dashboard/vix-feed-status";
 import { StrategyCapital } from "@/components/dashboard/strategy-capital";
 import useSWR, { useSWRConfig } from "swr";
 import dynamic from "next/dynamic";
@@ -27,7 +28,7 @@ const CertificateIntradayChart = dynamic(
 );
 
 interface VixData {
-  spot: {
+  spot: VixFeedQuote & {
     price: number;
     change: number;
     changePct: number;
@@ -148,7 +149,7 @@ export default function DashboardPage() {
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
-  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
+  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: () => getRefreshInterval() > 0 ? 60000 : 0 });
   const { data: history } = useSWR<HistoricalData>(
     period !== "1d" ? `/api/vix/historical?period=${period}` : null
   );
@@ -302,6 +303,9 @@ export default function DashboardPage() {
           </button>
         </div>
 
+        <p className="text-xs" style={{ color: "#8B8FA8" }}>
+          {vixData?.timestamp ? `Daten abgerufen: ${formatDateTime(new Date(vixData.timestamp))}` : "Daten werden geladen"}
+        </p>
         <StrategyCapital />
 
         {/* Hero VIX SPOT Card */}
@@ -346,6 +350,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        <VixFeedStatus quote={vixData?.spot} />
 
         {/* Period Buttons + Chart */}
         <div className="flex items-center gap-1.5">
@@ -615,7 +621,7 @@ export default function DashboardPage() {
             <h1 className="text-2xl font-bold text-white">Dashboard</h1>
             <p className="text-sm mt-0.5" style={{ color: "#8B8FA8" }}>
               {vixData?.timestamp
-                ? `Zuletzt aktualisiert: ${formatDateTime(new Date(vixData.timestamp))}`
+                ? `Daten abgerufen: ${formatDateTime(new Date(vixData.timestamp))}`
                 : "Lade..."}
             </p>
           </div>
@@ -666,6 +672,7 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+            <VixFeedStatus quote={vixData?.spot} />
           </Card>
 
           {/* VIX Future */}

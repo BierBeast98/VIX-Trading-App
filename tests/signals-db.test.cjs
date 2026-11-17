@@ -8,7 +8,7 @@ const { initialState, evaluate } = require('../lib/signals/engine.ts');
 const { changeState, readState, recordFill } = require('../lib/signals/store.ts');
 const now = new Date('2026-10-19T15:00:00Z');
 const config = { enabled: true, capital: 10000, variant: 'B', leverage: 2.3, isin: 'DE000TEST0001', wkn: '', futureSymbol: 'UXG7', futureName: 'VX Feb 2027', futureExpiry: '2027-02-17', productVerified: true, barrier: 5, email: true, telegram: true, broker: 'Test', opensAt: '08:00', closesAt: '22:00', closedDates: [] };
-const quote = (vix, at, bid = 10) => ({ isin: config.isin, at: at.toISOString(), vix, vixAt: at.toISOString(), future: vix * 1.1, futureAt: at.toISOString(), bid, ask: 10, productAt: at.toISOString(), askAt: at.toISOString(), productValid: true });
+const quote = (vix, at, bid = 10) => ({ isin: config.isin, at: at.toISOString(), vix, vixRealtime:true,vixAt: at.toISOString(), future: vix * 1.1, futureAt: at.toISOString(), bid, ask: 10, productAt: at.toISOString(), askAt: at.toISOString(), productValid: true });
 test('transactional fills, concurrent retries, trade/position sync and rollback', async () => {
   try {
     await prisma.trade.deleteMany(); await prisma.position.deleteMany(); await prisma.vixCache.deleteMany();

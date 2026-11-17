@@ -1,15 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getVixSpot, getSpFutures, getVontobelFuturesQuote, getVontobelCertificatePrice } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
+import { allowed } from '@/lib/signals/auth';
 import { prisma } from "@/lib/prisma";
 
 const CACHE_KEY = "widget-data";
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 30_000; // Same short freshness cache as dashboard.
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
+  "Cache-Control": "no-store",
 };
 
 export async function OPTIONS() {
@@ -24,10 +25,26 @@ function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | nul
   ]);
 }
 
-export async function GET() {
-  const cached = memGet<object>(CACHE_KEY);
+type WidgetPayload = { markets: Array<{ symbol: string; price?: number | null; source?: string | null; sourceAt?: number | null; feedMode?: string | null; marketStatus?: string | null; [key: string]: unknown }>; [key: string]: unknown };
+
+// Recalculate age on every response, including in-memory cache hits.
+function withVixFreshness(payload: WidgetPayload): WidgetPayload {
+  const now = Date.now();
+  return { ...payload, markets: payload.markets.map(market => {
+    if (market.symbol !== "VIX") return market;
+    const age = typeof market.sourceAt === "number" && Number.isFinite(market.sourceAt) && market.sourceAt > 0 ? now - market.sourceAt : null;
+    return { ...market, stale: age == null || age < 0 || age > 300_000,
+      realtimeFresh: market.source === "massive" && market.feedMode === "realtime" && market.marketStatus?.toLowerCase() !== "closed" && typeof market.price === "number" && Number.isFinite(market.price) && market.price > 0 && age != null && age >= 0 && age <= 300_000 };
+  }) };
+}
+
+export async function GET(req: NextRequest) {
+  const realtimeAccess = allowed(req);
+  const provider = process.env.VIX_DATA_PROVIDER?.trim() || (process.env.MASSIVE_API_KEY?.trim() ? 'massive' : 'yahoo');
+  const cacheKey = `${CACHE_KEY}:${provider}:${!!process.env.MASSIVE_API_KEY?.trim()}:${realtimeAccess}`;
+  const cached = memGet<WidgetPayload>(cacheKey);
   if (cached) {
-    return NextResponse.json(cached, { headers: CORS_HEADERS });
+    return NextResponse.json(withVixFreshness(cached), { headers: CORS_HEADERS });
   }
 
   // Vontobel ISIN aus Settings lesen (Fallback auf Default)
@@ -42,7 +59,7 @@ export async function GET() {
 
   const [vixResult, vxResult, esResult, positionsResult] =
     await Promise.allSettled([
-      withTimeout(getVixSpot(), 8000),
+      withTimeout(getVixSpot({ allowRealtime: realtimeAccess }), 15000),
       withTimeout(getVontobelFuturesQuote(vontobelIsin), 8000),
       withTimeout(getSpFutures(), 8000),
       prisma.position.findMany({
@@ -105,6 +122,11 @@ export async function GET() {
       symbol: "VIX",
       price: vix ? parseFloat(vix.price.toFixed(2)) : null,
       changePct: vix ? parseFloat(vix.changePct.toFixed(2)) : null,
+      sourceAt: vix?.timestamp || null,
+      receivedAt: vix?.receivedAt ?? null,
+      source: vix?.source ?? null,
+      feedMode: vix?.feedMode ?? "unknown",
+      marketStatus: vix?.marketStatus ?? null,
     },
     {
       symbol: "VX",
@@ -156,7 +178,7 @@ export async function GET() {
     positions: openPositions,
   };
 
-  memSet(CACHE_KEY, payload, CACHE_TTL);
+  memSet(cacheKey, payload, CACHE_TTL);
 
-  return NextResponse.json(payload, { headers: CORS_HEADERS });
+  return NextResponse.json(withVixFreshness(payload), { headers: CORS_HEADERS });
 }

@@ -12,3 +12,18 @@ test('current issuer snapshot records contract identity and bid/ask separately',
 test('historical product underlying series is never falsely assigned to the current contract',()=>{const rows=vontobelSamples(JSON.stringify({payload:{series:[{isProduct:false,priceIdentifier:'generic',points:[{timestamp:at.getTime(),close:20}]},{isProduct:true,points:[{timestamp:at.getTime(),bid:.9}]}]}}),'DE000BD11R44','chart');assert.match(rows[0].instrument,/UNVERIFIED/);assert.equal(rows[0].contract,undefined);assert.equal(rows[0].quality,'unverified_contract');assert.equal(rows[1].open,undefined);});
 test('CSV preserves separators and quotes and neutralizes spreadsheet formulas',()=>{assert.equal(csvCell('a;"b'),'"a;""b"');assert.equal(csvCell('=1+1'),'"\'=1+1"');assert.equal(csvCell(-2.5),'"-2.5"');assert.equal(csvCell(null),'""');});
 test('scheduled collection respects Berlin time, holidays and weekends independently of trading flags',()=>{const c={...archiveDefaults,enabled:true};assert.equal(collectingNow(c,at),true);assert.equal(collectingNow({...c,closedDates:['2026-11-17']},at),false);assert.equal(collectingNow(c,new Date('2026-11-21T14:00:00Z')),false);assert.equal(collectingNow(c,new Date('2026-11-17T21:00:00Z')),false);assert.equal(collectingNow(c,new Date('2026-07-08T06:00:00Z')),true);});
+
+const {archiveRange}=require('../lib/archive/query.ts');
+test('archive filters accept Massive as a distinct source and preserve exact VIX instrument',()=>{
+ const params=new URLSearchParams({from:'2026-11-17T00:00:00Z',to:'2026-11-17T23:59:59Z',source:'massive',instrument:'MASSIVE:I:VIX'});
+ const range=archiveRange(params);assert.equal(range.source,'massive');assert.equal(range.instrument,'MASSIVE:I:VIX');
+ for(const source of ['','yahoo','vontobel']){params.set('source',source);assert.equal(archiveRange(params).source,source);}
+ params.set('source','unrecognized');assert.throws(()=>archiveRange(params));
+});
+test('Massive and Yahoo VIX observations remain separate even at the same timestamp and price',()=>{
+ const massive={source:'massive',instrument:'MASSIVE:I:VIX',kind:'index_quote',sourceAt:at.toISOString(),last:15};
+ const yahoo={...massive,source:'yahoo',instrument:'YAHOO:^VIX'};
+ assert.notEqual(sampleKey(massive,'m'),sampleKey(yahoo,'y'));
+});
+
+test('Yahoo VIX quote remains explicitly delayed even when source timestamp looks fresh',()=>{const row=yahooSamples('^VIX','quote',{regularMarketPrice:20,regularMarketTime:at})[0];assert.equal(row.quality,'delayed');assert.equal(row.metadata.delayMinutes,15);assert.equal(quality(row,at),'delayed');});

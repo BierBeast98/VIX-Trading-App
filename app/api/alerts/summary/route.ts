@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { allowed } from '@/lib/signals/auth';
 import { prisma } from "@/lib/prisma";
 import { ALERT_TYPES } from "@/lib/alert-types";
 
@@ -11,7 +12,8 @@ export interface AlertTypeSummary {
   active: boolean;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!allowed(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
   try {
     const [lastByType, activeStates] = await Promise.all([
       prisma.alertLog.groupBy({
@@ -54,7 +56,7 @@ export async function GET() {
       };
     }
 
-    return NextResponse.json({ types });
+    return NextResponse.json({ types }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[alerts/summary]", err);
     return NextResponse.json({ types: {} }, { status: 500 });

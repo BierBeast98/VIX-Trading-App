@@ -35,7 +35,8 @@ export function yahooSamples(symbol: string, operation: string, result: unknown)
     const last = positive(data.regularMarketPrice); if (last === null) return [];
     return [{ ...base, kind: symbol === '^VIX3M' ? 'index_proxy_quote' : symbol === '^VIX' ? 'index_quote' : 'market_quote',
       sourceAt: iso(data.regularMarketTime), last,
-      metadata: { symbol, proxyForVx: symbol === '^VIX3M', priceField: 'regularMarketPrice' } }];
+      ...(symbol === '^VIX' ? { quality: 'delayed' } : {}),
+      metadata: { symbol, proxyForVx: symbol === '^VIX3M', priceField: 'regularMarketPrice', ...(symbol === '^VIX' ? { feedMode: 'delayed', delayMinutes: 15 } : {}) } }];
   }
   const rows = Array.isArray(result) ? result : Array.isArray(data.quotes) ? data.quotes : [];
   return rows.flatMap((r: Record<string, unknown>) => {

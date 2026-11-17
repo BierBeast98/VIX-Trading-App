@@ -1,11 +1,14 @@
-import { NextResponse } from "next/server";
+import type { Prisma } from '@prisma/client';
+import { NextRequest, NextResponse } from "next/server";
 import { getVixSpot, getVixFutures, getEurUsd, getVontobelFuturesQuote, getVixHistory } from "@/lib/yahoo-finance";
 import { prisma } from "@/lib/prisma";
 import { calcZScore } from "@/lib/utils";
+import { allowed } from '@/lib/signals/auth';
 import { memGet, memSet } from "@/lib/server-cache";
 
-const MEM_TTL = 300_000; // 5 min — aligns with client refreshInterval
-const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
+const MEM_TTL = 30_000; // Short server cache; source timestamp remains unchanged.
+const CACHE_KEY = "vix_spot_feed_v2";
+const CC = { "Cache-Control": "no-store" };
 
 async function getSettings() {
   try {
@@ -17,28 +20,32 @@ async function getSettings() {
   } catch { return { vontobelIsin: undefined, rollingWindowDays: 30 }; }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const realtimeAccess = allowed(req);
+    const cacheKey = `${CACHE_KEY}:${realtimeAccess ? 'private' : 'public'}`;
+    const databaseCacheId = realtimeAccess ? 'spot_private_feed_v2' : 'spot';
+    const feedConfig = `${process.env.VIX_DATA_PROVIDER?.trim() || (process.env.MASSIVE_API_KEY?.trim() ? 'massive' : 'yahoo')}:${!!process.env.MASSIVE_API_KEY?.trim()}:${realtimeAccess}`;
     // 1. In-memory cache — fastest, no network round-trip
-    const hit = memGet<Record<string, unknown>>("vix_spot");
-    if (hit) return NextResponse.json(hit, { headers: CC });
+    const hit = memGet<Record<string, unknown>>(cacheKey);
+    if (hit?.feedConfig === feedConfig) return NextResponse.json(hit, { headers: CC });
 
     const { vontobelIsin, rollingWindowDays } = await getSettings();
 
     // 2. DB cache — skip if rollingWindowDays changed
     try {
-      const cached = await prisma.vixCache.findUnique({ where: { id: "spot" } });
+      const cached = await prisma.vixCache.findUnique({ where: { id: databaseCacheId } });
       if (cached && Date.now() - cached.updatedAt.getTime() < MEM_TTL) {
         const cachedData = cached.data as Record<string, unknown>;
-        if (cachedData.rollingWindowDays === rollingWindowDays) {
-          memSet("vix_spot", cachedData, MEM_TTL);
+        if (cachedData.rollingWindowDays === rollingWindowDays && cachedData.feedSchemaVersion === 2 && cachedData.feedConfig === feedConfig) {
+          memSet(cacheKey, cachedData, Math.max(1, MEM_TTL - (Date.now() - cached.updatedAt.getTime())));
           return NextResponse.json(cachedData, { headers: CC });
         }
       }
     } catch { /* DB not yet configured — continue to live fetch */ }
 
     const [spot, futures, eurUsd, vontobelQuote] = await Promise.all([
-      getVixSpot(),
+      getVixSpot({ allowRealtime: realtimeAccess }),
       getVixFutures(),
       getEurUsd(),
       getVontobelFuturesQuote(vontobelIsin),
@@ -64,8 +71,8 @@ export async function GET() {
           closes = freshHistory.map((h) => h.close);
           await prisma.vixCache.upsert({
             where: { id: "history_closes" },
-            update: { data: { closes } as any },
-            create: { id: "history_closes", data: { closes } as any },
+            update: { data: { closes } },
+            create: { id: "history_closes", data: { closes } },
           });
         }
       }
@@ -91,6 +98,7 @@ export async function GET() {
         ? ((futurePrice - futurePrevClose) / futurePrevClose) * 100
         : null;
     const data = {
+      feedSchemaVersion: 2, feedConfig, realtimeAccess,
       spot,
       futures,
       vontobelFuture: vontobelQuote,
@@ -105,13 +113,13 @@ export async function GET() {
     };
 
     // Store in-memory (instant for next hit within same instance)
-    memSet("vix_spot", data, MEM_TTL);
+    memSet(cacheKey, data, MEM_TTL);
 
     // Persist to DB async — don't block the response
     prisma.vixCache.upsert({
-      where: { id: "spot" },
-      update: { data: data as any },
-      create: { id: "spot", data: data as any },
+      where: { id: databaseCacheId },
+      update: { data: data as unknown as Prisma.InputJsonValue },
+      create: { id: databaseCacheId, data: data as unknown as Prisma.InputJsonValue },
     }).catch((e) => console.error("[vix/spot] cache upsert:", e));
 
     return NextResponse.json(data, { headers: CC });

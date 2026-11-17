@@ -28,7 +28,7 @@ export async function GET(req:NextRequest){
    responseBytes:volumes._sum.responseBytes??0,returnedPoints:volumes._sum.returnedPoints??0,insertedPoints:volumes._sum.insertedPoints??0,averageMs:volumes._avg.durationMs??0,
    streams,daily,lastRuns,lastPoints:lastPoints.map(p=>({...p,id:String(p.id)})),storageBytes:storage[0]?.bytes??0,
    persistenceErrorAt:persistenceError(),from:r.from,to:r.to,
-   measurementNote:'Gezählt werden direkte Vontobel-HTTP-Aufrufe und Yahoo-SDK-Aufrufe. Interne Yahoo-HTTP-Aufrufe und deren Bytes sind nicht erfasst. Bytes bezeichnen die dekomprimierte Vontobel-Antwortgröße, nicht den gesamten Netzwerkverkehr.',
+   measurementNote:'Gezählt werden direkte Massive- und Vontobel-HTTP-Aufrufe sowie Yahoo-SDK-Aufrufe. Interne Yahoo-HTTP-Aufrufe und deren Bytes sind nicht erfasst. Bytes bezeichnen die dekomprimierte Antwortgröße der direkten Massive- und Vontobel-Aufrufe, nicht den gesamten Netzwerkverkehr.',
    retentionNote:'Keine automatische Löschung. Speicherung ab Einrichtung; keine rückwirkend erfundenen Abrufzahlen. Die ältere generische FUTURES-Tabelle bleibt getrennt, weil Kontrakt und mögliche VIX3M-Fallbacks dort nicht eindeutig sind.',
   },{headers:{'Cache-Control':'no-store'}});
  }catch{return NextResponse.json({error:'Archivdaten konnten nicht geladen werden. Datenbankeinrichtung und Filter prüfen.'},{status:503});}

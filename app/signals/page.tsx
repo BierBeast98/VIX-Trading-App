@@ -5,7 +5,7 @@ import { BellRing, Check, ChevronDown, LockKeyhole, RefreshCw, Send, ShieldCheck
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { type State, type Config, type Signal, roundMetrics, marketOpen } from '@/lib/signals/engine';
-type Payload = State & { capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
+type Payload = State & { dataFeed?: { provider: string; keyConfigured: boolean }; capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
 const euro = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 const time = (s: string) => new Date(s).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' });
 const panel = 'rounded-2xl border border-[#1E1E28] bg-[#141418] p-5';
@@ -103,6 +103,7 @@ export default function SignalsPage() {
     </header>
     {message && <p role="status" className="rounded-xl border border-[#B8E15A]/20 p-4 text-sm text-[#B8E15A]">{message}</p>}
     <section className={`${panel} flex flex-wrap items-start justify-between gap-4`}><div className="flex gap-3"><span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${!data.config.enabled ? 'bg-[#8B8FA8]' : stale ? 'bg-red-400' : open ? 'bg-[#B8E15A]' : 'bg-amber-400'}`} /><div><p className="font-medium text-white">{!data.config.enabled ? 'Überwachung pausiert' : !open ? 'Broker-Handelsfenster geschlossen' : stale ? 'Prüflauf überfällig' : 'Überwachung eingerichtet'}</p><p className="mt-1 text-sm text-[#8B8FA8]">{data.health}</p><p className="mt-1 text-xs text-[#8B8FA8]">Letzte Prüfung: {data.checkedAt ? time(data.checkedAt) : 'noch keine'} · {data.config.broker || 'Broker offen'} {data.config.opensAt && `${data.config.opensAt}–${data.config.closesAt} Uhr, Europe/Berlin`}</p></div></div><Button variant="ghost" onClick={() => { setConfig(data.config); setShowConfig(!showConfig); }}>Einrichtung {showConfig ? 'schließen' : 'öffnen'}</Button></section>
+    <p className="rounded-xl border border-[#2E2E3A] p-3 text-sm text-amber-300">{data.dataFeed?.keyConfigured ? 'VIX-Echtzeitzugang konfiguriert. Datenberechtigung und originale Kurszeit werden bei jedem Prüflauf kontrolliert.' : 'VIX-Echtzeitzugang fehlt. Verzögerte Kurse dienen zur Orientierung und lösen keine neuen Käufe aus.'}</p>
     <section className="grid gap-3 sm:grid-cols-3">
       {[['Strategiekapital', euro(r?.capital ?? data.config.capital), r ? 'Für diese Runde festgeschrieben' : 'Budget für die nächste Runde'], ['Bestätigter Einsatz', euro(r?.spent ?? 0), 'Kumulierte Käufe inklusive Gebühren'], ['Offene Signale', String(pending.length), 'Signal ist keine ausgeführte Order']].map(([label, value, sub]) => <div key={label} className={panel}><p className="text-xs text-[#8B8FA8]">{label}</p><p className="my-2 text-2xl font-semibold text-white">{value}</p><p className="text-xs text-[#8B8FA8]">{sub}</p></div>)}
     </section>

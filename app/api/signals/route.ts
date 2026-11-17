@@ -20,7 +20,8 @@ export async function GET(req: NextRequest) {
   if (!allowed(req)) return NextResponse.json({ error: 'Bitte Signalbereich entsperren', configured: !!process.env.SIGNALS_ACCESS_KEY }, { status: 401 });
   try {
     const [state, settings, baseline] = await Promise.all([readState(), prisma.settings.findUnique({ where: { id: 1 } }), prisma.vixCache.findUnique({ where: { id: 'account_capital' } })]);
-    return NextResponse.json({ ...state, capitalManaged: (baseline?.data as { source?: string } | null)?.source === 'strategy-baseline', channels: {
+    const provider = process.env.VIX_DATA_PROVIDER?.trim() || (process.env.MASSIVE_API_KEY?.trim() ? 'massive' : 'yahoo');
+    return NextResponse.json({ ...state, dataFeed: { provider, keyConfigured: provider === 'massive' && !!process.env.MASSIVE_API_KEY?.trim() }, capitalManaged: (baseline?.data as { source?: string } | null)?.source === 'strategy-baseline', channels: {
       telegram: !!process.env.TELEGRAM_BOT_TOKEN && !!(await telegramChatId()),
       email: !!process.env.RESEND_API_KEY && !!settings?.alertEmail,
       links: !!process.env.APP_URL,
@@ -33,6 +34,8 @@ export async function PUT(req: NextRequest) {
     const config = configSchema.parse(await req.json());
     if (config.enabled && (!config.broker || !config.opensAt || !config.closesAt || config.opensAt >= config.closesAt || !config.productVerified || !config.isin || !config.futureSymbol || !config.futureExpiry || !config.futureName || config.barrier <= 0 || (!config.email && !config.telegram))) throw new Error('Brokerzeiten, geprüftes Long-Produkt, VX-Basisvertrag und mindestens einen Versandkanal einrichten');
     const result = await changeState(async (state, tx) => {
+      const provider = process.env.VIX_DATA_PROVIDER?.trim() || (process.env.MASSIVE_API_KEY?.trim() ? 'massive' : 'yahoo');
+      if (config.enabled && !state.config.enabled && (provider !== 'massive' || !process.env.MASSIVE_API_KEY?.trim())) throw new Error('Vor Aktivierung ist ein VIX-Echtzeitzugang erforderlich. Der verzögerte Yahoo-Kurs genügt nicht.');
       const baseline = await tx.vixCache.findUnique({ where: { id: 'account_capital' } });
       if ((baseline?.data as { source?: string } | null)?.source === 'strategy-baseline' && config.capital !== state.config.capital) throw new Error('Strategiekapital wird aus der bestätigten Kapitalbasis und den Ausführungen fortgeschrieben. Ein-/Auszahlungen bitte zuerst abstimmen.');
       const locked = state.round || state.signals.some(s => s.status === 'pending');
