@@ -429,3 +429,10 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Konfigurations-API erhält Policy bei älteren Clients, sperrt Änderung während offener Runde/Signale, setzt Kreuzungszustand bei Änderungen zurück. `delayed20` benötigt keinen API-Key; Wechsel zur Echtzeitregel verlangt bei aktivierter Überwachung weiterhin den Echtzeitzugang.
 - 44 Signal-/Telegramtests,34 Finanz-/Konfigurationstests,16 Feedtests und12 Archivtests bestanden (106gesamt), TypeScript, gezieltes ESLint und Webpack-Build erfolgreich. Tests senden keine echten Nachrichten. Bereitstellung und anschließende Übernahme der explizit bestätigten Policy werden separat verifiziert.
 - Überwachung bleibt pausiert, Produkt-/Open-End-Rollverfahren und30-Tage-VX-Regel in dieser Änderung nicht angepasst. Kapital1.500 EUR bleibt erhalten.
+
+### Bestätigte Regel live gespeichert und geprüft
+
+- Commit `ec505da` auf vix-trading.de, Hostinger-Build `01a1ea35-e16a-710c-a9ca-388b28b1a6eb` completed.
+- `manual_strategy_v1.config.vixEntryPolicy=delayed20` nach Row-Lock und Prüfung (pausiert, keine offene Runde/Signale,1.500 EUR) gespeichert. Zustimmung/Altwert unter `vix_delay_policy_20261117` protokolliert. Kreuzungszustand zurückgesetzt. Budget1.500 EUR, productVerifiedfalse, executions0 und enabledfalse unverändert.
+- Zweite **echte Adapterprobe** (unter `origin=operator_quote_probe` im Archiv gezählt): empfangen **17.11.2026 16:56:50.526 Berlin**, Yahoo-VIX15,075 Minuten alt und nach bestätigter Regel verwertbar; **BD11R4 Bid1,05 / Ask1,06 EUR**, Vontobel-Snapshot **16:56:34.253** = **16,273 Sekunden alt**, tatsächlicher VX7,526 Sekunden alt. `issuerMappingValid=true`. Dies ist eine schreibfreie Markt-/Regelprobe hinsichtlich Trades/Signale; keine Order/Nachricht/Signalüberwachung aktiviert. Drei echte Marktquellenabrufe im Archiv gespeichert.
+- Live-Dashboard200, Signal-API ohne Anmeldung401. Alle106 Tests, TypeScript/gezieltes ESLint und Produktionsbuild bestanden. Kein bezahlter Anbieterzugang eingerichtet.
