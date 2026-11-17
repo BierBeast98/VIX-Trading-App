@@ -37,6 +37,7 @@ Verkäufe werden anhand frischer Produkt-Geldkurse auch bei ausgefallenem VIX/VX
 ## Regeln
 
 - Beobachtetes Unterschreiten von VIX 15,5: kumuliert 30 %. Neue Abwärtskreuzungen bei 14,5 und 13,5: 40 % bzw. 50 %. Bei übersprungenen Schwellen gilt die erreichte Zielstufe. Bei 12,5 keine zusätzliche Stufe.
+- Bestätigte VIX-Datenregel `delayed20`: Yahoo-VIX für Einstiege maximal20 Minuten alt; Zertifikats-Geld/Brief und tatsächlicher VX weiterhin maximal5 Minuten. Ausstiege verwenden den frischen Vontobel-Geldkurs unabhängig vom VIX. Quelle/Kurszeit des verzögerten Einstiegs sichtbar.
 - VX/VIX-Aufschlag maximal 15 %, konkreter VX-Kontrakt mindestens 30 Tage Restlaufzeit. Ein Produkt-/Kontraktwechsel ist bei offener Runde gesperrt.
 - Weitere Käufe gesperrt nach aktivem Trailing oder Teilreduktion. Budget pro Nachkauf ist kumulierte Zielquote minus tatsächliche bisherige Kaufkosten inklusive Gebühren.
 - Trailing ab +10 % auf den gemeinsamen liquidierbaren Positionswert relativ zu verbleibenden Anschaffungskosten: 8 % Abstand zum Höchstwert, ab +20 % 6 %, ab +35 % 5 %. Die Barriere sinkt nicht. Verkauf bei Unterschreiten.

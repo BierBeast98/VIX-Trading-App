@@ -1,18 +1,33 @@
 import { telegramChatId } from './telegram';
 import { Resend } from 'resend';
 import { readState, changeState } from './store';
-import { marketOpen, fresh, type Signal } from './engine';
+import { marketOpen, fresh, entryVixUsable, type Signal, type State } from './engine';
 const eur = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 export function signalText(s: Signal, reminder = false) {
   return [reminder ? 'Erinnerung: Ausführung noch nicht erfasst' : (s.side === 'buy' ? 'KAUFSIGNAL' : 'VERKAUFSSIGNAL'),
     s.reason, `ISIN: ${s.isin}`, `Rundenbudget: ${eur(s.capital)}`,
     s.side === 'buy' ? `Zielquote: ${s.targetPct} % · zusätzlicher Betrag bis ${eur(s.budget)} inkl. Gebühren` : 'Verkauf der angegebenen Stückzahl',
     `${s.quantity} Stück · ${s.side === 'buy' ? 'Briefkurs' : 'Geldkurs'} bei Signal: ${eur(s.price)}`,
-    `Kurszeit: ${new Date(s.quoteAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}`,
+    s.side === 'buy' ? `VIX-Einstiegsbasis: ${s.vixSource === 'yahoo' ? 'Yahoo Finance' : s.vixSource ?? 'Quelle nicht aufgezeichnet'} · ${s.vixFeedMode === 'delayed' ? 'verzögert' : s.vixFeedMode === 'realtime' ? 'Echtzeit' : 'Feedmodus nicht aufgezeichnet'} · Kurszeit ${s.vixAt ? new Date(s.vixAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : 'nicht aufgezeichnet'} · Alter bei Signal ${s.vixAgeMinutes != null ? s.vixAgeMinutes.toFixed(1) + ' Min.' : 'nicht aufgezeichnet'}` : '',
+    s.side === 'buy' && s.vixFeedMode === 'delayed' ? 'VIX-Einstiegsbasis ist zeitversetzt; der aktuelle Zertifikatskurs kann bereits auf Marktbewegungen reagiert haben.' : '',
+    `Vontobel-Kurszeit: ${new Date(s.quoteAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}`,
     s.side === 'buy' ? `Kaufsignal gültig bis ${new Date(s.expiresAt).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' })}; Gebühren bei Stückzahl berücksichtigen.` : 'Verkaufssignal bleibt bis zur Bestätigung offen. Aktuellen Kurs vor der Order prüfen.',
     'Order selbst beim Broker aufgeben. Danach Screenshot senden oder Ausführung in der App erfassen.',
     process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/signals#${s.id}` : '',
   ].filter(Boolean).join('\n');
+}
+const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+/** Recheck both the signal's original basis and the latest observation before claiming a delivery. */
+function dispatchable(state: State, signal: Signal, now: Date): boolean {
+  const quote = state.quote, cfg = state.round?.config ?? state.config;
+  if (!quote || quote.isin !== signal.isin || !positive(quote.bid) || !fresh(quote.productAt, now)) return false;
+  if (signal.side === 'sell') return true;
+  const basis = { ...quote, vix: signal.vix, vixAt: signal.vixAt ?? null,
+    vixSource: signal.vixSource, vixFeedMode: signal.vixFeedMode,
+    vixRealtime: signal.vixSource === 'massive' && signal.vixFeedMode === 'realtime' };
+  return quote.productValid !== false && positive(quote.ask) && quote.ask >= quote.bid && positive(quote.future) &&
+    fresh(quote.askAt ?? quote.productAt, now) && fresh(quote.futureAt, now) && fresh(signal.quoteAt, now) &&
+    entryVixUsable(cfg, quote, now) && entryVixUsable(cfg, basis, now) && Date.parse(signal.expiresAt) >= now.getTime();
 }
 /** Per-channel receipts: failures retry; successful channels are not resent until reminder due. */
 export async function deliverSignals() {
@@ -20,13 +35,14 @@ export async function deliverSignals() {
   if (!state.config.enabled || !marketOpen(state.config, now)) return;
   if (!state.quote || !fresh(state.quote.productAt, now)) return;
   for (const signal of state.signals.filter(s => s.status === 'pending')) {
-    if (signal.side === 'buy' && (!fresh(state.quote.vixAt, now) || !fresh(state.quote.futureAt, now) || Date.parse(signal.expiresAt) < now.getTime())) continue;
+    if (!dispatchable(state, signal, now)) continue;
     for (const channel of ['telegram', 'email'] as const) {
       if (!state.config[channel]) continue;
       const leaseKey = `${channel}:lease`;
       const claimed = await changeState(async s => {
         const target = s.signals.find(x => x.id === signal.id);
         if (!s.config.enabled || !marketOpen(s.config, new Date()) || target?.status !== 'pending') return { state: s, result: null };
+        if (!dispatchable(s, target, new Date())) return { state: s, result: null };
         const receipt = target.notification[channel];
         const elapsed = receipt?.sentAt ? Date.now() - Date.parse(receipt.sentAt) : Infinity;
         const interval = target.side === 'sell' ? 15 * 60000 : 86400000;

@@ -5,7 +5,7 @@ import { BellRing, Check, ChevronDown, LockKeyhole, RefreshCw, Send, ShieldCheck
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { type State, type Config, type Signal, roundMetrics, marketOpen } from '@/lib/signals/engine';
-type Payload = State & { dataFeed?: { provider: string; keyConfigured: boolean }; capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
+type Payload = State & { dataFeed?: { provider: string; keyConfigured: boolean; entryPolicy?: 'realtime' | 'delayed20'; maxVixAgeMinutes?: number; productMaxAgeMinutes?: number }; capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
 const euro = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 const time = (s: string) => new Date(s).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' });
 const panel = 'rounded-2xl border border-[#1E1E28] bg-[#141418] p-5';
@@ -15,7 +15,8 @@ async function request(url: string, method: string, body?: unknown) {
   if (!res.ok) throw new Error(data.error ?? 'Anfrage fehlgeschlagen');
   return data;
 }
-function SignalCard({ signal, onDone }: { signal: Signal; onDone: () => void }) {
+type SignalWithFeed = Signal & { vixAt?: string | null; vixSource?: string | null; vixFeedMode?: string | null; vixAgeMinutes?: number | null };
+function SignalCard({ signal, onDone }: { signal: SignalWithFeed; onDone: () => void }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [quantity, setQuantity] = useState(String(signal.quantity)), [price, setPrice] = useState(''), [fees, setFees] = useState('');
   const [at, setAt] = useState(''), [note, setNote] = useState('');
@@ -46,6 +47,7 @@ function SignalCard({ signal, onDone }: { signal: Signal; onDone: () => void }) 
       <div><p className="text-xs text-[#8B8FA8]">{buy ? 'Stückzahl vor Gebühren' : 'Signalwert'}</p><p className="mt-1 text-xl text-white">{buy ? `${signal.quantity} Stück` : euro(signal.quantity * signal.price)}</p></div>
     </div>
     <p className="mt-4 text-xs leading-relaxed text-[#8B8FA8]">Kursstand {time(signal.quoteAt)}. {buy ? `Rundenbudget ${euro(signal.capital)}. Kauf gültig bis ${time(signal.expiresAt)}; Stückzahl um Brokergebühren anpassen.` : 'Verkaufssignal bleibt bis zur Erfassung offen; aktuellen Kurs vor der Order prüfen.'}</p>
+    {buy && <p className="mt-2 text-xs leading-relaxed text-[#8B8FA8]">VIX bei Signal: Quelle {signal.vixSource ?? 'nicht aufgezeichnet'} · Kurszeit {signal.vixAt && Number.isFinite(Date.parse(signal.vixAt)) ? time(signal.vixAt) : 'nicht aufgezeichnet'} · Alter {typeof signal.vixAgeMinutes === 'number' && Number.isFinite(signal.vixAgeMinutes) ? `${signal.vixAgeMinutes.toFixed(1)} Min.` : 'nicht aufgezeichnet'}{signal.vixFeedMode ? ` · ${signal.vixFeedMode === 'delayed' ? 'verzögert' : signal.vixFeedMode === 'realtime' ? 'Echtzeitfeed' : 'Feedmodus unbekannt'}` : ''}</p>}
     <div className="mt-3 flex flex-wrap gap-3 text-xs text-[#8B8FA8]">{(['telegram', 'email'] as const).map(c => <span key={c}>{c === 'email' ? 'E-Mail' : 'Telegram'}: {signal.notification[c]?.error ?? (signal.notification[c]?.sentAt ? `zugestellt ${time(signal.notification[c]!.sentAt!)}` : 'noch nicht zugestellt')}</span>)}</div>
     {canRecord && <div className="mt-5 border-t border-[#1E1E28] pt-4">
       <p className="mb-3 text-sm text-[#8B8FA8]">Trade ausgeführt? Schicke den Screenshot im Chat. Alternativ hier selbst erfassen.</p>
@@ -95,6 +97,10 @@ export default function SignalsPage() {
   const metrics = r && data.quote?.bid != null ? roundMetrics(r, data.quote.bid) : null;
   const stale = data.config.enabled && (!data.checkedAt || Date.now() - Date.parse(data.checkedAt) > 7 * 60000);
   const open = marketOpen(data.config, new Date()); void tick;
+  const entryPolicy = data.dataFeed?.entryPolicy ?? (data.config as Config & { vixEntryPolicy?: 'realtime' | 'delayed20' }).vixEntryPolicy ?? 'realtime';
+  const productTime = data.quote?.productAt ? Date.parse(data.quote.productAt) : NaN;
+  const productAge = Number.isFinite(productTime) ? Date.now() - productTime : null;
+  const productAgeText = productAge == null ? 'Kurszeit unbekannt' : productAge < 0 ? 'Kurszeit liegt in der Zukunft' : `${Math.floor(productAge / 60000)} Min. alt${productAge > 300000 ? ' · älter als 5 Min.' : ''}`;
   const set = <K extends keyof Config>(k: K, v: Config[K]) => setConfig({ ...config, [k]: v });
   const refresh = () => { void mutate(); };
   return <div className="mx-auto max-w-6xl space-y-6 p-4 lg:p-8">
@@ -103,7 +109,12 @@ export default function SignalsPage() {
     </header>
     {message && <p role="status" className="rounded-xl border border-[#B8E15A]/20 p-4 text-sm text-[#B8E15A]">{message}</p>}
     <section className={`${panel} flex flex-wrap items-start justify-between gap-4`}><div className="flex gap-3"><span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${!data.config.enabled ? 'bg-[#8B8FA8]' : stale ? 'bg-red-400' : open ? 'bg-[#B8E15A]' : 'bg-amber-400'}`} /><div><p className="font-medium text-white">{!data.config.enabled ? 'Überwachung pausiert' : !open ? 'Broker-Handelsfenster geschlossen' : stale ? 'Prüflauf überfällig' : 'Überwachung eingerichtet'}</p><p className="mt-1 text-sm text-[#8B8FA8]">{data.health}</p><p className="mt-1 text-xs text-[#8B8FA8]">Letzte Prüfung: {data.checkedAt ? time(data.checkedAt) : 'noch keine'} · {data.config.broker || 'Broker offen'} {data.config.opensAt && `${data.config.opensAt}–${data.config.closesAt} Uhr, Europe/Berlin`}</p></div></div><Button variant="ghost" onClick={() => { setConfig(data.config); setShowConfig(!showConfig); }}>Einrichtung {showConfig ? 'schließen' : 'öffnen'}</Button></section>
-    <p className="rounded-xl border border-[#2E2E3A] p-3 text-sm text-amber-300">{data.dataFeed?.keyConfigured ? 'VIX-Echtzeitzugang konfiguriert. Datenberechtigung und originale Kurszeit werden bei jedem Prüflauf kontrolliert.' : 'VIX-Echtzeitzugang fehlt. Verzögerte Kurse dienen zur Orientierung und lösen keine neuen Käufe aus.'}</p>
+    <div className="rounded-xl border border-[#2E2E3A] p-3 text-sm text-[#8B8FA8]">
+      <p>{entryPolicy === 'delayed20' ? 'Einstieg: Yahoo, bis 20 Min. Kursalter. Ein kostenpflichtiger Datenzugang ist für diese Regel nicht erforderlich.' : 'Einstieg: Echtzeit-VIX, bis 5 Min. Kursalter. Verzögerte Kurse lösen bei dieser Einstellung keine Käufe aus.'}</p>
+      <p className="mt-1">Ausstieg: Vontobel-Geldkurs bis 5 Min. Der zuletzt bekannte Kurs ist kein garantierter Ausführungspreis.</p>
+      <p className="mt-1">Yahoo-Kurse sind typischerweise etwa 15 Min. verzögert; die Signalprüfung ist alle 5 Min. vorgesehen.</p>
+      {data.quote && <p className="mt-1">Vontobel-Kurszeit: {Number.isFinite(productTime) ? `${time(data.quote.productAt!)} Uhr (Berlin)` : 'unbekannt'} · {productAgeText}</p>}
+    </div>
     <section className="grid gap-3 sm:grid-cols-3">
       {[['Strategiekapital', euro(r?.capital ?? data.config.capital), r ? 'Für diese Runde festgeschrieben' : 'Budget für die nächste Runde'], ['Bestätigter Einsatz', euro(r?.spent ?? 0), 'Kumulierte Käufe inklusive Gebühren'], ['Offene Signale', String(pending.length), 'Signal ist keine ausgeführte Order']].map(([label, value, sub]) => <div key={label} className={panel}><p className="text-xs text-[#8B8FA8]">{label}</p><p className="my-2 text-2xl font-semibold text-white">{value}</p><p className="text-xs text-[#8B8FA8]">{sub}</p></div>)}
     </section>

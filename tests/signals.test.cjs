@@ -47,3 +47,75 @@ test('missing VIX realtime entitlement does not suppress a certificate-price ris
   const next = evaluate(bought(), { ...quote(15, now, 7.9), vixRealtime: false }, now);
   assert.equal(next.signals[0].side, 'sell'); assert.match(next.signals[0].reason, /Rundenverlustlimit/);
 });
+
+function delayedReady() { const s = ready(); s.config.vixEntryPolicy = 'delayed20'; return s; }
+function delayedQuote(value, now = start, ageMinutes = 20, changes = {}) {
+  return { ...quote(value, now), vixRealtime: false, vixSource: 'yahoo', vixFeedMode: 'delayed',
+    vixAt: new Date(now.getTime() - ageMinutes * 60000).toISOString(), ...changes };
+}
+function delayedArmed() {
+  const early = new Date(start.getTime() - 60000);
+  return evaluate(delayedReady(), delayedQuote(16, early), early);
+}
+test('explicit delayed20 entry accepts original Yahoo samples at exactly 20 minutes and records provenance', () => {
+  const s = evaluate(delayedArmed(), delayedQuote(15), start);
+  assert.equal(s.signals.length, 1); const signal = s.signals[0];
+  assert.equal(signal.side, 'buy'); assert.equal(signal.vix, 15);
+  assert.equal(signal.vixSource, 'yahoo'); assert.equal(signal.vixFeedMode, 'delayed');
+  assert.equal(signal.vixAt, '2026-11-17T14:40:00.000Z'); assert.equal(signal.vixAgeMinutes, 20);
+  assert.equal(signal.quoteAt, start.toISOString()); assert.equal(signal.price, 10);
+});
+test('delayed entry rejects 20 minutes plus one millisecond and 21 minutes without advancing source state', () => {
+  for (const vixAt of [new Date(start.getTime() - 20 * 60000 - 1).toISOString(), new Date(start.getTime() - 21 * 60000).toISOString()]) {
+    const before = delayedArmed(); const next = evaluate(before, delayedQuote(15, start, 20, { vixAt }), start);
+    assert.equal(next.signals.length, 0); assert.equal(next.previousVixAt, before.previousVixAt);
+    assert.match(next.health, /20 Minuten/);
+  }
+});
+test('delayed entry fails closed on missing or wrong provenance and invalid original timestamps', () => {
+  for (const changes of [{vixSource:undefined},{vixSource:'massive'},{vixSource:'unknown'},{vixFeedMode:undefined},{vixFeedMode:'unknown'},{vixFeedMode:'realtime'},{vixAt:null},{vixAt:'invalid'},{vixAt:new Date(start.getTime()+60001).toISOString()}]) {
+    const next = evaluate(delayedArmed(), delayedQuote(15,start,20,changes),start);
+    assert.equal(next.signals.length,0); assert.match(next.health,/20 Minuten/);
+  }
+});
+test('delayed source tolerance permits exactly one minute of clock skew, but source samples still advance', () => {
+  const early = new Date(start.getTime() - 60000);
+  const armed = evaluate(delayedReady(),delayedQuote(16,early,-1),early);
+  const next = evaluate(armed,delayedQuote(15,start,-1),start);
+  assert.equal(next.signals.length,1); assert.equal(next.signals[0].vixAgeMinutes,-1);
+});
+test('delayed20 permission never relaxes Vontobel bid, ask, or actual VX five-minute limits', () => {
+  for (const field of ['productAt','askAt','futureAt']) {
+    const state=delayedArmed();state.quote=null;
+    const next = evaluate(state,delayedQuote(15,start,20,{[field]:new Date(start.getTime()-5*60000-1).toISOString()}),start);
+    assert.equal(next.signals.length,0,field);
+  }
+  const atBoundary = new Date(start.getTime()-5*60000).toISOString();
+  const boundaryState=delayedArmed();boundaryState.quote=null;
+  assert.equal(evaluate(boundaryState,delayedQuote(15,start,20,{productAt:atBoundary,askAt:atBoundary,futureAt:atBoundary}),start).signals.length,1);
+});
+test('delayed source crossing never bridges gaps over ten minutes or reuses the same source sample', () => {
+  const late = new Date(start.getTime()+11*60000);
+  assert.equal(evaluate(delayedArmed(),delayedQuote(15,late),late).signals.length,0);
+  const before=delayedArmed();
+  assert.equal(evaluate(before,delayedQuote(15,start,20,{vixAt:before.previousVixAt}),start).signals.length,0);
+});
+test('omitted and realtime policies retain the five-minute realtime entry requirement', () => {
+  for(const policy of [undefined,'realtime','invalid']) {
+    const s=ready(); if(policy !== undefined)s.config.vixEntryPolicy=policy;
+    s.previousVix=16;s.previousVixAt=new Date(start.getTime()-21*60000).toISOString();s.armed=true;
+    assert.equal(evaluate(s,delayedQuote(15),start).signals.length,0);
+  }
+  const s=ready();s.config.vixEntryPolicy='realtime';s.previousVix=16;s.previousVixAt=new Date(start.getTime()-6*60000).toISOString();s.armed=true;
+  assert.equal(evaluate(s,{...quote(15),vixAt:new Date(start.getTime()-5*60000-1).toISOString()},start).signals.length,0);
+});
+test('risk exit needs a fresh Vontobel bid while delayed/missing VIX and actual VX cannot suppress it', () => {
+  const s=bought();s.config.vixEntryPolicy='delayed20';s.round.config.vixEntryPolicy='delayed20';
+  const now=new Date(start.getTime()+60000);
+  const q=delayedQuote(15,now,21,{vix:null,vixAt:null,future:null,futureAt:null,bid:7.9,ask:null});
+  const exit=evaluate(s,q,now);assert.equal(exit.signals[0].side,'sell');assert.equal(exit.signals[0].vix,null);
+  assert.equal(exit.signals[0].vixAgeMinutes,null);assert.match(exit.signals[0].reason,/Rundenverlustlimit/);
+  const staleState=structuredClone(s);staleState.quote=null;
+  const stale=evaluate(staleState,{...q,productAt:new Date(now.getTime()-5*60000-1).toISOString()},now);
+  assert.equal(stale.signals.filter(signal=>signal.status==='pending').length,0);assert.match(stale.health,/kein frischer Geldkurs/);
+});

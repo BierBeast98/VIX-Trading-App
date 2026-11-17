@@ -126,6 +126,7 @@ export async function GET(req: NextRequest) {
       receivedAt: vix?.receivedAt ?? null,
       source: vix?.source ?? null,
       feedMode: vix?.feedMode ?? "unknown",
+      delayMinutes: vix?.delayMinutes ?? null,
       marketStatus: vix?.marketStatus ?? null,
     },
     {

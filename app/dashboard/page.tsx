@@ -149,7 +149,7 @@ export default function DashboardPage() {
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
-  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: () => getRefreshInterval() > 0 ? 60000 : 0 });
+  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
   const { data: history } = useSWR<HistoricalData>(
     period !== "1d" ? `/api/vix/historical?period=${period}` : null
   );
