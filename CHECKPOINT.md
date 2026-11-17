@@ -348,3 +348,12 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Temporäre Administrationsfreigabe und lokale Geheimnisdatei nach Erfolg entfernt.
 - Handelsüberwachung ausdrücklich in Produktion pausiert (`manual_strategy_v1.config.enabled = false`), abschließend verifiziert. Keine Orders ausgeführt.
 - Offen vor Nutzung des geschützten Signalbereichs: `SIGNALS_ACCESS_KEY` auf Hostinger einrichten. Offen vor Aktivierung: deutscher Broker/Handelsplatz, Handelsfenster/Feiertage, aktives Produkt und tatsächlich frische Geld-/Briefkurse.
+
+## Bestätigte Strategie-Einrichtung (17.11.2026, nach Telegram-Test)
+
+- Nutzer bestätigt Strategie; Kapital ausdrücklich **1.500 EUR**, Zielhebel ungefähr **2,0** statt zwingend 2,3. Kaufkaskade: 450 EUR / insgesamt 600 EUR / insgesamt 750 EUR, jeweils Gebühren inklusive. Reserve 750 EUR; 6-%-Rundensignal bei 90 EUR Verlust (keine garantierte Verlustobergrenze).
+- Broker als **comdirect** verstanden; Screenshot zeigt Handelsplatz Stuttgart. Vorbereitete Überwachung Mo–Fr 08:00–22:00 Europe/Berlin, bekannte volle Stuttgarter Schließtage 2026 hinterlegt. Weiterhin pausiert.
+- Produktbeispiel **BD11R4 / DE000BD11R44**, Vontobel Mini Future Long in EUR. Kein Ausführungsbeleg, kein Trade angelegt. Beispielprüfung separat unter `manual_strategy_product_review` gespeichert, **keine Produktfreigabe**.
+- Stuttgarter Stammdaten/Titel nennen noch November, aktuelle Emittentenmetadaten am 17.11. zeigen **UXZ6 / Dezember 2026**, Verfall 16.12.2026. Heute 29 Kalendertage: scheitert an unveränderter Mindestrestlaufzeit 30 Tage. Roll-/Kontraktzuordnung muss vor konkreter Produktfreigabe eindeutig sein.
+- Vontobel liefert echte Geld-/Briefkurse im aktuellen `price`-Snapshot mit `latestTimestamp` (keine getrennten bidTimestamp/askTimestamp). Adapter nutzt diesen echten Quellzeitstempel und aktuelle Basiswert-Snapshotdaten; keine erfundene Abrufzeit/kein geschätzter Briefkurs. Zusätzlich Long-Richtung im Adapter geprüft.
+- Zielhebel 2,0 im API-Schema und in der Oberfläche ergänzt; bisherige Modellvarianten bleiben verfügbar. 33 Tests und Webpack-Produktionsbuild bestanden.

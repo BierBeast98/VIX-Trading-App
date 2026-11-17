@@ -113,7 +113,7 @@ export default function SignalsPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Input label="Strategiekapital in EUR" type="number" min="1" step="any" disabled={locked} value={config.capital} onChange={e => set('capital', Number(e.target.value))} />
           <Select label="Ausstiegsvariante" disabled={locked} value={config.variant} onChange={e => set('variant', e.target.value as Config['variant'])} options={[{ value: 'A', label: 'A · Zeitverkauf nach 10 Tagen' }, { value: 'B', label: 'B · 80-%-Reduktion / Restposition' }, { value: 'C', label: 'C · B plus 6-%-Rundenlimit' }]} />
-          <Select label="Geplanter Einstiegshebel" disabled={locked} value={config.leverage} onChange={e => set('leverage', Number(e.target.value))} options={[1.5, 1.9, 2.3].map(n => ({ value: String(n), label: String(n) }))} />
+          <Select label="Geplanter Einstiegshebel" disabled={locked} value={config.leverage} onChange={e => set('leverage', Number(e.target.value))} options={[1.5, 1.9, 2, 2.3].map(n => ({ value: String(n), label: String(n) }))} />
           <Input label="Long-Zertifikat · ISIN" disabled={locked} value={config.isin} onChange={e => set('isin', e.target.value.toUpperCase().trim())} placeholder="Geprüftes aktives EUR-Produkt" />
           <Input label="WKN" disabled={locked} value={config.wkn} onChange={e => set('wkn', e.target.value.toUpperCase().trim())} />
           <Input label="Knock-out-Barriere (USD)" type="number" step="any" min="0" disabled={locked} value={config.barrier} onChange={e => set('barrier', Number(e.target.value))} />

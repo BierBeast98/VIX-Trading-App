@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma';
 export const dynamic = 'force-dynamic';
 const configSchema = z.object({
   enabled: z.boolean(), capital: z.number().finite().min(1).max(100000000),
-  variant: z.enum(['A', 'B', 'C']), leverage: z.union([z.literal(1.5), z.literal(1.9), z.literal(2.3)]),
+  variant: z.enum(['A', 'B', 'C']), leverage: z.union([z.literal(1.5), z.literal(1.9), z.literal(2), z.literal(2.3)]),
   isin: z.union([z.literal(''), z.string().regex(/^[A-Z]{2}[A-Z0-9]{10}$/)]), wkn: z.string().max(12),
   futureSymbol: z.string().max(30), futureName: z.string().max(160),
   futureExpiry: z.union([z.literal(''), z.iso.date()]), productVerified: z.boolean(),
