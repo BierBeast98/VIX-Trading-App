@@ -8,7 +8,7 @@ import {
   BarChart3,
   Briefcase,
   Bell,
-  CalendarDays,
+  BellRing,
 } from "lucide-react";
 
 const tabs = [
@@ -16,7 +16,7 @@ const tabs = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/trades", label: "Positionen", icon: Briefcase },
   { href: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
-  { href: "/calendar", label: "Kalender", icon: CalendarDays },
+  { href: "/signals", label: "Signale", icon: BellRing },
 ];
 
 export function BottomTabBar() {

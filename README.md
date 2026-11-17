@@ -53,3 +53,7 @@ To learn more about Next.js, take a look at the following resources:
 
 Jeder Push zu `main` triggert automatisch ein Deployment auf Hostinger (vix-trading.de).
 Env Vars setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellung.
+
+## Konkrete Handelssignale
+
+Der neue Bereich `/signals` berechnet die Long-Kaskade und Ausstiegssignale, benachrichtigt per Telegram plus E-Mail und verbucht tatsächliche Ausführungen nach Screenshot/Bestätigung. Standardmäßig pausiert. Einrichtung, Broker-Handelszeiten, Marktdatenanforderungen und Screenshot-Workflow: [docs/SIGNALS.md](docs/SIGNALS.md).

@@ -42,7 +42,7 @@ async function fetchQuote(symbol: string): Promise<VixQuote | null> {
       fiftyTwoWeekLow: result.fiftyTwoWeekLow ?? 0,
       timestamp: result.regularMarketTime
         ? new Date(result.regularMarketTime).getTime()
-        : Date.now(),
+        : 0,
     };
   } catch (err) {
     console.error(`Error fetching quote for ${symbol}:`, err);

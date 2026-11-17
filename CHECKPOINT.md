@@ -310,3 +310,30 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 ---
 
 *Zuletzt aktualisiert: 2026-07-08 (Session 10)*
+
+
+## Zuletzt durchgeführte Änderungen (2026-11-17) — Manuelle Handelssignale
+
+- Neuer geschützter Bereich `/signals` (auch in der mobilen Navigation): Konfiguration, konkrete Kauf-/Verkaufssignale, Zustellstatus, Ausführungsformular, Signal-/Ausführungshistorie. Screenshot kann im Chat übermittelt und danach strukturiert erfasst werden; kein automatischer Screenshot-Import.
+- Deterministische Long-Strategie A/B/C mit 30/40/50-%-Kaskade, echtem VX-Aufschlagfilter, 30 Tagen Restlaufzeit, gemeinsamem Trailing und Rundenlimit. Keine KI-/Broker-Aufrufe.
+- Broker-/Handelsplatzfenster in Europe/Berlin einschließlich Wochenenden und expliziten Feiertagen; keine voreingestellten Brokerzeiten, standardmäßig deaktiviert. Brokerangabe des Nutzers steht noch aus.
+- Telegram + E-Mail mit getrennten Zustellbelegen, Fehlerwiederholung und 15-Min-Verkaufserinnerung während der Handelszeiten. Neue Server-Variablen siehe `docs/SIGNALS.md`. Es wurden keine echten Nachrichten verschickt.
+- Zustand im bestehenden `VixCache` unter `manual_strategy_v1`, ohne Migration. Row-Lock und Transaktion verbinden Ausführungsbestätigung mit Positionen/Trades, verhindern Doppelbuchungen und schützen Signalpositionen vor unabhängigen Änderungen im alten Editor.
+- Bestehender Cron `/api/alerts/check` integriert Signalprüfung; eigener `/api/signals/check` verfügbar. `dryRun` schreibt keinen Signalzustand. Keine automatischen Orders.
+- Der Adapter verlangt echte frische Geld-/Briefkurse und geprüftes aktives EUR-Long-Produkt; kein Ersatz durch VIX3M oder geschätzte Briefkurse. Alte Standard-ISIN bei Prüfung inaktiv, deshalb nicht übernommen. Neue aktive Produkt-/Datenfeedprüfung vor Aktivierung erforderlich.
+- Umsetzung und Tests erfolgten lokal; keine Produktionsdaten verändert. Bereitstellung und externe Versand-/Cron-Einrichtung müssen separat verifiziert werden.
+
+### Verifikation dieser Änderung
+
+- 21 Regel-/Benachrichtigungstests bestanden (Versand vollständig simuliert).
+- Separater PostgreSQL-Integrationstest bestanden: konkurrierende Bestätigungen, Teilverkauf/Restbestand, vollständiger Ausstieg, Transaktions-Rollback und Row-Lock.
+- Zehn lokale HTTP-Prüfungen bestanden: Zugriffsschutz, Originprüfung, HttpOnly-Cookie, Bestand, Konfigurationssperre und Schutz vor Änderungen im alten Editor.
+- Desktop-/390px-Handyansicht und simulierte Ausführungsbestätigung im Browser geprüft. Screenshot mit ausschließlich Testdaten außerhalb des Repositorys gespeichert.
+- Produktionsbuild und TypeScript-Prüfung bestanden; Produktionsdatenbank und externe Nachrichtendienste blieben unberührt.
+
+## Telegram-Einrichtung am 17.11.2026
+
+- Bot des Nutzers: `Vix98_Trading_Bot`. Token nach Screenshot durch Nutzer erneuert; neuer Token nur bei Hostinger hinterlegt.
+- Hostinger-Eintrag per Browser von `TELEGRAM_BOT` auf `TELEGRAM_BOT_TOKEN` korrigiert und per API verifiziert. Wert nicht ausgegeben; übrige Variablen erhalten.
+- Hostinger-Rebuild aus gespeicherter Quelle scheitert an fehlender `package.json`. Neuer vollständiger Quellstand muss bewusst bereitgestellt werden. Bisherige lokale Signaländerungen sind noch nicht deployed.
+- Geschützte Telegram-Verknüpfungsroute und Operator-Helfer ergänzt. Bestätigte Chat-ID kann ohne weitere manuelle Servervariable im vorhandenen VixCache gespeichert werden. Der Nutzer muss dafür nach Bereitstellung einen einmaligen persönlichen Startlink öffnen. Verbindung/Testnachricht noch nicht abgeschlossen.

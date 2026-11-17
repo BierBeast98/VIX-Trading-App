@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const managed = await prisma.position.findUnique({ where: { id } });
+    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
     const body = await req.json();
     const position = await prisma.position.update({ where: { id }, data: body });
     return NextResponse.json(position);
@@ -16,6 +18,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const managed = await prisma.position.findUnique({ where: { id } });
+    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
     const position = await prisma.position.findUnique({ where: { id } });
     if (!position) {
       return NextResponse.json({ error: "Position not found" }, { status: 404 });

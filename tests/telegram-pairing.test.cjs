@@ -1,0 +1,14 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+require('./load-ts.cjs');
+const { hash, hasSecret, privateChatForPairing } = require('../lib/signals/telegram-pairing.ts');
+const start = 'a'.repeat(32), admin = 'b'.repeat(43);
+const pairing = { adminHash: hash(admin), startHash: hash(start), expectedBot: 'Vix98_Trading_Bot', issuedAt: '2026-11-17T13:00:00Z', expiresAt: '2026-11-17T13:30:00Z', status: 'pending' };
+const update = (id = 123) => ({ message: { chat: { id, type: 'private' }, from: { id, is_bot: false }, text: `/start ${start}`, date: Date.parse('2026-11-17T13:05:00Z') / 1000 } });
+test('pairing uses separate admin and Telegram secrets', () => { assert.equal(hasSecret(admin, pairing.adminHash), true); assert.equal(hasSecret(start, pairing.adminHash), false); assert.equal(hasSecret('', pairing.adminHash), false); assert.equal(hasSecret(admin, 'invalid'), false); });
+test('plain Start or unrelated messages cannot select an arbitrary first chat', () => { const u = update(); u.message.text = '/start'; assert.equal(privateChatForPairing([u], pairing), null); });
+test('exact private pairing message selects the sender', () => assert.equal(privateChatForPairing([update()], pairing), '123'));
+test('groups, mismatched sender and bot senders are rejected', () => { for (const change of ['group', 'sender', 'bot']) { const u = update(); if (change === 'group') u.message.chat.type = 'group'; if (change === 'sender') u.message.from.id = 555; if (change === 'bot') u.message.from.is_bot = true; assert.equal(privateChatForPairing([u], pairing), null); } });
+test('old messages and messages after pairing expiration are rejected', () => { for (const at of ['2026-11-17T12:00:00Z', '2026-11-17T14:00:00Z']) { const u = update(); u.message.date = Date.parse(at) / 1000; assert.equal(privateChatForPairing([u], pairing), null); } });
+test('ambiguous recipients are rejected while duplicate updates are harmless', () => { assert.throws(() => privateChatForPairing([update(123), update(456)], pairing), /mehreren Chats/); assert.equal(privateChatForPairing([update(), update()], pairing), '123'); });
+test('malformed provider responses fail closed', () => { for (const value of [null, {}, [{ message: {} }], [{ message: { text: 1 } }]]) assert.equal(privateChatForPairing(value, pairing), null); });

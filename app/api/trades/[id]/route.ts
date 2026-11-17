@@ -25,6 +25,8 @@ const UpdateTradeSchema = z.object({
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const managed = await prisma.trade.findUnique({ where: { id } });
+    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
     const body = await req.json();
     const parsed = UpdateTradeSchema.parse(body);
 
@@ -76,6 +78,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const managed = await prisma.trade.findUnique({ where: { id } });
+    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
     const trade = await prisma.trade.findUnique({ where: { id } });
     await prisma.trade.delete({ where: { id } });
     // Also delete linked position if it exists

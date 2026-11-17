@@ -1,3 +1,5 @@
+import { runSignalsCheck } from '@/lib/signals/service';
+import { cronAllowed } from '@/lib/signals/auth';
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getVixSpot, getVontobelFuturesQuote } from "@/lib/yahoo-finance";
@@ -22,8 +24,7 @@ export async function GET(req: NextRequest) {
   // Bearer-Auth ist IMMER Pflicht (der frühere ?test=true-Bypass ist entfernt).
   // ?force=true  → Handelszeit-Gate umgehen
   // ?dryRun=true → komplett schreibfrei: keine Mails, kein AlertLog/AlertState, keine Floor-Writes
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronAllowed(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -31,15 +32,21 @@ export async function GET(req: NextRequest) {
   const force = params.get("force") === "true";
   const dryRun = params.get("dryRun") === "true";
 
+  // Manual strategy has its own broker hours. Never run it through the legacy force bypass.
+  const manualSignals = dryRun ? { checked: false, message: 'dryRun: Signalzustand unverändert' }
+    : await runSignalsCheck().catch(() => ({ checked: false, message: 'Signalprüfung fehlgeschlagen' }));
+
+  const useManualSignals = "managed" in manualSignals && manualSignals.managed === true;
+
   // Skip outside trading hours (07:00–22:30 CET/CEST) — VIX certificates illiquid outside window
   if (!force && !isWithinTradingHours()) {
-    return NextResponse.json({ message: "Outside trading hours (07:00–22:30 CET)" });
+    return NextResponse.json({ message: "Outside trading hours (07:00–22:30 CET)", manualSignals });
   }
 
   try {
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     if (!settings || !settings.alertEmail) {
-      return NextResponse.json({ message: "No settings or email configured" });
+      return NextResponse.json({ message: "No settings or email configured", manualSignals });
     }
 
     const alertSettings: AlertSettings = {
@@ -60,7 +67,7 @@ export async function GET(req: NextRequest) {
     const [spot, futureQuote, positions, histCache] = await Promise.all([
       getVixSpot(),
       getVontobelFuturesQuote(vontobelIsin),
-      prisma.position.findMany({ where: { status: "open" } }),
+      prisma.position.findMany({ where: { status: "open", NOT: { notes: { startsWith: "signal:" } } } }),
       prisma.vixCache.findUnique({ where: { id: "history_closes" } }),
     ]);
     if (!spot) {
@@ -68,7 +75,7 @@ export async function GET(req: NextRequest) {
     }
 
     const now = Date.now();
-    const staleSpot = spot.timestamp > 0 && now - spot.timestamp > STALE_MS;
+    const staleSpot = !Number.isFinite(spot.timestamp) || spot.timestamp <= 0 || now - spot.timestamp > STALE_MS || spot.timestamp - now > 60_000;
 
     // Gecachte Bids für alle offenen Positionen in EINEM Query (inkl. Frische-Check)
     const bidByCert = new Map<string, { bid: number | null; fresh: boolean }>();
@@ -93,7 +100,7 @@ export async function GET(req: NextRequest) {
 
     // Entry + Std-Dev + Spot-Spike nur mit frischem Spot bewerten
     if (!staleSpot) {
-      if (config.entry.enabled) {
+      if (config.entry.enabled && !useManualSignals) {
         evaluations.push({ key: "entry", alert: checkVixEntry(spot.price, alertSettings) });
       }
 
@@ -236,6 +243,7 @@ export async function GET(req: NextRequest) {
     const triggered = evaluations.filter((e) => e.alert != null);
     return NextResponse.json({
       checked: true,
+      manualSignals,
       dryRun,
       vix: spot.price,
       staleSpot,
