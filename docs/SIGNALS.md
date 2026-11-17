@@ -99,3 +99,13 @@ BD11R4 / DE000BD11R44 ist ein Produktbeispiel, keine bestätigte Order und noch 
 Der Adapter wertet die aktuellen Vontobel-Preis-Snapshots mit deren `latestTimestamp` aus. Getrennte bidTimestamp/askTimestamp haben Vorrang, wenn vorhanden. Produktchart-Kurse sind nur datierte Rückfälle; ein Briefkurs wird niemals aus Geldkurs/Spread geschätzt. Long-Richtung, EUR und identischer aktueller Basisvertrag müssen passen.
 
 Quellen: https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/DE000BD11R44 · https://www.boerse-stuttgart.de/en/products/leverage-products/knock-out-products/stuttgart/bd11r4/ · https://www.boerse-stuttgart.de/de-de/handel/handelszeiten/ · https://cdn.cboe.com/resources/aboutcboe/Cboe-2026FuturesSettlementCalendar.pdf
+
+## Serverüberwachung starten (17.11.2026)
+
+Der Nutzer hat den Start ausdrücklich autorisiert. Für dieses Setup wird ein eigener Hostinger-Prüflauf alle fünf Minuten mit einer minimal berechtigten Scheduler-Kennung verwendet. Nur der Hash der Kennung liegt unter `VixCache.signal_monitor_cron_v1`; das Klartextgeheimnis gehört ausschließlich in die private Cron-Konfiguration. Es berechtigt zu `GET /api/signals/check`, nicht zur Konfiguration, Ausführungsbestätigung oder zum Lesen von Archiv-/Kontodaten. Bestehendes `CRON_SECRET` bleibt optional kompatibel. Letzter Aufruf/Abschluss/Fehler wird ohne Kurs-/Geheimnisdaten im Scheduler-Datensatz protokolliert.
+
+Serverseitig gilt das Brokerfenster08–22 Europe/Berlin mit Wochenenden und hinterlegten Schließtagen. Außerhalb wird die Signalprüfung übersprungen. Der Datenarchiv-Cron läuft unabhängig weiter. Kein Cron erteilt Brokerorders.
+
+Geprüftes Beispielprodukt BD11R4/DE000BD11R44 wird mit dem aktuellen VX-Vertrag UXZ6 (Dezember2026), Verfall16.12.2026 und Barriere12,10USD überwacht. Die unbegrenzte Laufzeit des Zertifikats ist bestätigt; laut endgültigen Bedingungen rollt der Emittent in spätere Futures und passt Basispreis/Barriere an. Die App übernimmt einen Roll nicht ungeprüft und weicht die30-Tage-VX-Regel nicht auf: bei Start am17.11. sind neue Käufe deswegen gesperrt. Ein aktiver Prüftakt ist keine Freigabe einer regelwidrigen Order.
+
+Quellen: [Vontobel](https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/DE000BD11R44), [endgültige Bedingungen](https://derinet.vontobel.ch/finalterms/DE000BD11R44d.pdf), [Cboe-Verfallkalender](https://www.cboe.com/markets/us/futures/market-statistics/settlement/futures/daily).

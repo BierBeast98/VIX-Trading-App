@@ -8,7 +8,7 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
-    "test:signals": "node --test tests/signals.test.cjs tests/signals-notify.test.cjs tests/telegram-pairing.test.cjs tests/vontobel-quote.test.cjs",
+    "test:signals": "node --test tests/signals.test.cjs tests/signals-notify.test.cjs tests/telegram-pairing.test.cjs tests/vontobel-quote.test.cjs tests/signals-schedule.test.cjs",
     "test:archive": "node --test tests/archive.test.cjs",
     "test:financial": "node --test tests/capital.test.cjs tests/capital-config.test.cjs tests/analytics.test.cjs tests/trade-api.test.cjs",
     "test:vix-feed": "node --test tests/vix-feed.test.cjs tests/vix-fallback.test.cjs tests/vix-api.test.cjs tests/vix-access.test.cjs"
