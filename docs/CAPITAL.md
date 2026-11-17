@@ -13,7 +13,7 @@ Es gibt keine automatische Verrechnung historischer Gewinne mit dem neuen Budget
 
 Historische Renditen werden aus tatsächlichen Ein-/Ausstiegskursen abgeleitet, soweit vorhanden. Ein bereits als Short gekauftes Zertifikat profitiert ebenfalls von einem steigenden **Zertifikatskurs**; dessen Rendite wird nicht nochmals invertiert. Euro-Ergebnisse historischer Trades sind brutto, weil Gebühren dort nicht verlässlich strukturiert vorliegen. Die neue Kapitalrechnung verwendet dagegen die bestätigten Ausführungsgebühren.
 
-Widersprüchliche Datumsfolgen werden angezeigt und aus Kennzahlen ausgeschlossen. Der bestehende Trade `DE000VU4MAY5` hat Einstieg 23.03.2026 und Ausstieg 09.03.2026. Ohne Beleg wird keines der Daten geraten oder vertauscht. Neue/aktualisierte Buchungen dürfen keinen Ausstieg vor dem Einstieg enthalten.
+Widersprüchliche Datumsfolgen werden angezeigt und aus Kennzahlen ausgeschlossen. Der Trade `DE000VU4MAY5` hatte zunächst Einstieg 23.03.2026 und Ausstieg 09.03.2026. Der Nutzer hat den Verkauf ausdrücklich auf **09.04.2026** korrigiert. Diese Korrektur und die vorherigen Werte sind protokolliert; die Haltedauer beträgt 17 Tage. Der Trade wird wieder ausgewertet. Neue/aktualisierte Buchungen dürfen keinen Ausstieg vor dem Einstieg enthalten.
 
 Die Bereinigung am 17.11.2026 hat fünf geschlossene Positionsanzeigen anhand ihrer jeweils einzigen verknüpften abgeschlossenen Trade-Buchung synchronisiert. Originalwerte und vorheriges Budget sind unter `VixCache.capital_reconciliation_20261117` protokolliert; keine Trades wurden gelöscht. Geschlossene Positionen ohne eindeutigen zugehörigen Ausführungsbeleg bleiben unverändert.
 
