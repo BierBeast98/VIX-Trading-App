@@ -1,27 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { calcPerformanceMetrics, suggestPositionSize } from "@/lib/analytics";
-import { memGet, memSet } from "@/lib/server-cache";
-
-const CACHE_KEY = "analytics_result";
-const CACHE_TTL = 60_000; // 60s — trades are rarely added; stale data is acceptable
+import { calcPerformanceMetrics } from "@/lib/analytics";
+import { holdingDays, tradeReturn } from "@/lib/trade-metrics";
 
 export async function GET() {
-  // In-memory cache — avoids full trade table scan + metric computation on every request
-  const cached = memGet<object>(CACHE_KEY);
-  if (cached) {
-    return NextResponse.json(cached, { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=300" } });
-  }
-
   try {
-    let trades: Awaited<ReturnType<typeof prisma.trade.findMany>> = [];
-    let settings: Awaited<ReturnType<typeof prisma.settings.findUnique>> = null;
-    try {
-      [trades, settings] = await Promise.all([
-        prisma.trade.findMany({ orderBy: { entryDate: "asc" } }),
-        prisma.settings.findUnique({ where: { id: 1 } }),
-      ]);
-    } catch { /* DB not configured */ }
+    const trades = await prisma.trade.findMany({ orderBy: { entryDate: "asc" } });
 
     const metrics = calcPerformanceMetrics(
       trades.map((t) => ({
@@ -35,7 +19,7 @@ export async function GET() {
 
     // Entry level analysis
     const closedWithReturn = trades.filter(
-      (t) => t.exitDate && t.returnPct !== null
+      (t) => t.exitDate && holdingDays(t.entryDate, t.exitDate) != null && tradeReturn(t) != null && Number.isFinite(t.entryVix) && t.entryVix > 0
     );
 
     const entryBuckets: Record<string, { count: number; totalReturn: number; wins: number }> = {};
@@ -43,8 +27,8 @@ export async function GET() {
       const bucket = `${Math.floor(trade.entryVix / 2) * 2}-${Math.floor(trade.entryVix / 2) * 2 + 2}`;
       if (!entryBuckets[bucket]) entryBuckets[bucket] = { count: 0, totalReturn: 0, wins: 0 };
       entryBuckets[bucket].count++;
-      entryBuckets[bucket].totalReturn += trade.returnPct ?? 0;
-      if ((trade.returnPct ?? 0) > 0) entryBuckets[bucket].wins++;
+      entryBuckets[bucket].totalReturn += tradeReturn(trade) ?? 0;
+      if ((tradeReturn(trade) ?? 0) > 0) entryBuckets[bucket].wins++;
     }
 
     const entryAnalysis = Object.entries(entryBuckets)
@@ -54,11 +38,10 @@ export async function GET() {
         avgReturn: data.count > 0 ? data.totalReturn / data.count : 0,
         winRate: data.count > 0 ? data.wins / data.count : 0,
       }))
-      .sort((a, b) => a.range.localeCompare(b.range));
+      .sort((a, b) => parseFloat(a.range) - parseFloat(b.range));
 
-    const result = { metrics, entryAnalysis, riskBudget: settings?.riskBudget ?? 10000 };
-    memSet(CACHE_KEY, result, CACHE_TTL);
-    return NextResponse.json(result, { headers: { "Cache-Control": "s-maxage=60, stale-while-revalidate=300" } });
+    const result = { metrics, entryAnalysis };
+    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

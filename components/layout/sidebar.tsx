@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useAlertCount } from "@/lib/hooks/use-alert-count";
 import {
   LayoutDashboard,
   History,
@@ -11,7 +10,6 @@ import {
   BellRing,
   BarChart3,
   Calendar,
-  Bell,
   Settings,
   Zap,
   Menu,
@@ -26,7 +24,6 @@ const navItems = [
   { href: "/trades", label: "Trades", icon: History },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/calendar", label: "Kalender", icon: Calendar },
-  { href: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { href: "/settings", label: "Einstellungen", icon: Settings },
 ];
 
@@ -38,13 +35,11 @@ const mobileNavItems = [
   { href: "/archive", label: "Datenarchiv", icon: Database },
   { href: "/trades", label: "Trades", icon: History },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { href: "/settings", label: "Einstellungen", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
-  const unacknowledgedCount = useAlertCount();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Close sidebar on route change
@@ -81,7 +76,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex flex-col gap-1 p-3 flex-1">
-        {items.map(({ href, label, icon: Icon, showBadge }) => {
+        {items.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || pathname.startsWith(href + "/");
           return (
             <Link
@@ -101,17 +96,7 @@ export function Sidebar() {
             >
               <Icon size={16} />
               <span className="flex-1">{label}</span>
-              {showBadge && unacknowledgedCount > 0 && (
-                <span
-                  className="flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold"
-                  style={{
-                    background: isActive ? "#000000" : "#FF4D4D",
-                    color: isActive ? "#B8E15A" : "#FFFFFF",
-                  }}
-                >
-                  {unacknowledgedCount}
-                </span>
-              )}
+
             </Link>
           );
         })}
@@ -123,7 +108,7 @@ export function Sidebar() {
           Kein Auto-Trading
         </div>
         <div className="text-xs" style={{ color: "#4A4A5A" }}>
-          Nur Alerts & Tracking
+          Signale & Tracking
         </div>
       </div>
     </>

@@ -19,8 +19,8 @@ const configSchema = z.object({
 export async function GET(req: NextRequest) {
   if (!allowed(req)) return NextResponse.json({ error: 'Bitte Signalbereich entsperren', configured: !!process.env.SIGNALS_ACCESS_KEY }, { status: 401 });
   try {
-    const [state, settings] = await Promise.all([readState(), prisma.settings.findUnique({ where: { id: 1 } })]);
-    return NextResponse.json({ ...state, channels: {
+    const [state, settings, baseline] = await Promise.all([readState(), prisma.settings.findUnique({ where: { id: 1 } }), prisma.vixCache.findUnique({ where: { id: 'account_capital' } })]);
+    return NextResponse.json({ ...state, capitalManaged: (baseline?.data as { source?: string } | null)?.source === 'strategy-baseline', channels: {
       telegram: !!process.env.TELEGRAM_BOT_TOKEN && !!(await telegramChatId()),
       email: !!process.env.RESEND_API_KEY && !!settings?.alertEmail,
       links: !!process.env.APP_URL,
@@ -32,7 +32,9 @@ export async function PUT(req: NextRequest) {
   try {
     const config = configSchema.parse(await req.json());
     if (config.enabled && (!config.broker || !config.opensAt || !config.closesAt || config.opensAt >= config.closesAt || !config.productVerified || !config.isin || !config.futureSymbol || !config.futureExpiry || !config.futureName || config.barrier <= 0 || (!config.email && !config.telegram))) throw new Error('Brokerzeiten, geprüftes Long-Produkt, VX-Basisvertrag und mindestens einen Versandkanal einrichten');
-    const result = await changeState(async state => {
+    const result = await changeState(async (state, tx) => {
+      const baseline = await tx.vixCache.findUnique({ where: { id: 'account_capital' } });
+      if ((baseline?.data as { source?: string } | null)?.source === 'strategy-baseline' && config.capital !== state.config.capital) throw new Error('Strategiekapital wird aus der bestätigten Kapitalbasis und den Ausführungen fortgeschrieben. Ein-/Auszahlungen bitte zuerst abstimmen.');
       const locked = state.round || state.signals.some(s => s.status === 'pending');
       const keys = ['capital', 'variant', 'leverage', 'isin', 'wkn', 'futureSymbol', 'futureName', 'futureExpiry', 'productVerified', 'barrier'] as const;
       if (locked && keys.some(k => config[k] !== state.config[k])) throw new Error('Strategie und Produkt sind bei offener Runde oder offenem Signal gesperrt');

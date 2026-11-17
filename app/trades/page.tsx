@@ -2,13 +2,14 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { getRefreshInterval } from "@/lib/trading-hours";
 import { Plus, Pencil, Trash2, Download, Bell, BellOff, TrendingUp, Loader2, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Textarea } from "@/components/ui/input";
+import { calcPerformanceMetrics } from "@/lib/analytics";
+import { holdingDays, tradeReturn } from "@/lib/trade-metrics";
 import { formatDate, formatNumber, formatPct } from "@/lib/utils";
 
 interface Trade {
@@ -32,16 +33,9 @@ interface Trade {
   notes: string;
 }
 
-/**
- * Haltedauer in Tagen — immer aus Ein-/Ausstiegsdatum berechnet (Single Source of Truth),
- * unabhängig vom evtl. null/veralteten gespeicherten holdDays-Wert.
- * Negativ = Ausstieg liegt vor Einstieg (Dateneingabe-Fehler).
- */
-function holdDaysFromDates(entryDate: string, exitDate: string | null): number | null {
-  if (!exitDate) return null;
-  const ms = new Date(exitDate).getTime() - new Date(entryDate).getTime();
-  if (!Number.isFinite(ms)) return null;
-  return Math.round(ms / 86_400_000);
+function holdDaysFromDates(entryDate: string, exitDate: string | null): string | null {
+  const days = holdingDays(entryDate, exitDate);
+  return days == null ? null : days.toLocaleString("de-DE", { maximumFractionDigits: 1 });
 }
 
 interface TradeItemProps {
@@ -63,13 +57,14 @@ const TradeCardMobile = memo(function TradeCardMobile({
   onEdit,
   onDelete,
 }: TradeItemProps & { isExpanded: boolean; onToggle: (id: string) => void }) {
+  const derivedReturn = tradeReturn(trade);
   const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
   const abstand = trade.entryVix && trade.barrierLevel
-    ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+    ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
   const isOpen = !trade.exitDate;
-  const currentPnlPct = liveBid && trade.entryPrice
+  const currentPnlPct = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0
     ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
-  const currentPnlEur = liveBid && trade.entryPrice && trade.quantity
+  const currentPnlEur = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0 && trade.quantity
     ? (liveBid - trade.entryPrice) * trade.quantity : null;
   return (
     <div
@@ -113,9 +108,9 @@ const TradeCardMobile = memo(function TradeCardMobile({
           ) : (
             <span
               className="text-sm font-bold"
-              style={{ color: (trade.returnPct ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" }}
+              style={{ color: (derivedReturn ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" }}
             >
-              {trade.returnPct != null ? `${trade.returnPct >= 0 ? "+" : ""}${formatNumber(trade.returnPct, 1)}%` : "—"}
+              {derivedReturn != null ? `${derivedReturn >= 0 ? "+" : ""}${formatNumber(derivedReturn, 1)}%` : "—"}
             </span>
           )}
           <ChevronDown
@@ -175,7 +170,7 @@ const TradeCardMobile = memo(function TradeCardMobile({
             </div>
             <div>
               <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>Haltetage</span>
-              <span className="text-sm text-white">{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</span>
+              <span className="text-sm text-white">{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? (trade.exitDate ? "Datum prüfen" : "—")}</span>
             </div>
           </div>
           {isOpen && liveBid != null && (
@@ -195,11 +190,11 @@ const TradeCardMobile = memo(function TradeCardMobile({
               )}
             </div>
           )}
-          {trade.returnPct != null && (
+          {derivedReturn != null && (
             <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid #1E1E28" }}>
               <span className="text-xs" style={{ color: "#8B8FA8" }}>Rendite</span>
-              <span className="text-sm font-bold" style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                {trade.returnPct >= 0 ? "+" : ""}{formatNumber(trade.returnPct, 2)}%
+              <span className="text-sm font-bold" style={{ color: derivedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+                {derivedReturn >= 0 ? "+" : ""}{formatNumber(derivedReturn, 2)}%
               </span>
             </div>
           )}
@@ -237,14 +232,15 @@ const TradeRowDesktop = memo(function TradeRowDesktop({
   onEdit,
   onDelete,
 }: TradeItemProps & { index: number }) {
+  const derivedReturn = tradeReturn(trade);
   const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
   const abstand = trade.entryVix && trade.barrierLevel
-    ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
+    ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
     : null;
   const tradeIsOpen = !trade.exitDate;
-  const tradePnlPct = liveBid && trade.entryPrice
+  const tradePnlPct = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0
     ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
-  const tradePnlEur = liveBid && trade.entryPrice && trade.quantity
+  const tradePnlEur = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0 && trade.quantity
     ? (liveBid - trade.entryPrice) * trade.quantity : null;
   return (
     <tr className="border-b transition-colors" style={{ borderColor: "#1E1E28", background: index % 2 === 0 ? "transparent" : "#0D0D11" }}>
@@ -308,13 +304,13 @@ const TradeRowDesktop = memo(function TradeRowDesktop({
               </div>
             )}
           </div>
-        ) : trade.returnPct !== null ? (
-          <span style={{ color: trade.returnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {formatPct(trade.returnPct)}
+        ) : derivedReturn !== null ? (
+          <span style={{ color: derivedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
+            {formatPct(derivedReturn)}
           </span>
         ) : "—"}
       </td>
-      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? "—"}</td>
+      <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? (trade.exitDate ? "Datum prüfen" : "—")}</td>
       <td className="py-3 px-2">
         {trade.alertTriggered
           ? <Bell size={13} style={{ color: "#B8E15A" }} />
@@ -355,7 +351,7 @@ const EMPTY_FORM = {
 };
 
 export default function TradesPage() {
-  const { data: trades = [], isLoading: loading, mutate: mutateTrades } = useSWR<Trade[]>("/api/trades");
+  const { data: trades = [], isLoading: loading, error: tradesError, mutate: mutateTrades } = useSWR<Trade[]>("/api/trades");
 
   // Live prices for open trades
   const openIsins = useMemo(
@@ -396,8 +392,8 @@ export default function TradesPage() {
         ratio: data.ratio != null ? String(data.ratio) : f.ratio,
         entryVix: data.underlying != null ? String(data.underlying) : f.entryVix,
       }));
-    } catch (err: any) {
-      setProductError(err.message || "Fehler beim Abrufen");
+    } catch (err: unknown) {
+      setProductError(err instanceof Error ? err.message : "Fehler beim Abrufen");
     } finally {
       setFetchingProduct(false);
     }
@@ -417,10 +413,9 @@ export default function TradesPage() {
   useEffect(() => {
     const ep = parseFloat(form.entryPrice);
     const xp = parseFloat(form.exitPrice);
-    if (!isNaN(ep) && ep > 0 && !isNaN(xp) && xp > 0) {
+    if (!isNaN(ep) && ep > 0 && !isNaN(xp) && xp >= 0) {
       setForm((f) => ({ ...f, returnPct: (((xp - ep) / ep) * 100).toFixed(2) }));
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.entryPrice, form.exitPrice]);
 
   const openNew = () => {
@@ -452,6 +447,18 @@ export default function TradesPage() {
     setModalOpen(true);
   }, []);
 
+  const linkedEditHandled = useRef(false);
+  useEffect(() => {
+    if (linkedEditHandled.current || !trades.length) return;
+    const id = new URLSearchParams(window.location.search).get("edit");
+    const trade = trades.find(t => t.id === id);
+    if (trade) {
+      linkedEditHandled.current = true;
+      if (trade.notes.startsWith("signal:")) window.location.assign("/signals");
+      else openEdit(trade);
+    }
+  }, [trades, openEdit]);
+
   const handleSave = async () => {
     if (!/^[A-Z0-9]{12}$/.test(form.certificateId)) {
       setSaveError("ISIN muss genau 12 Zeichen haben (z.B. DE000VU4MAY5)");
@@ -461,7 +468,7 @@ export default function TradesPage() {
     setSaveError(null);
     const ep = form.entryPrice ? parseFloat(form.entryPrice) : null;
     const xp = form.exitPrice ? parseFloat(form.exitPrice) : null;
-    const autoReturn = ep && xp ? ((xp - ep) / ep) * 100 : null;
+    const autoReturn = ep != null && ep > 0 && xp != null && xp >= 0 ? ((xp - ep) / ep) * 100 : null;
 
     const payload = {
       certificateId: form.certificateId,
@@ -532,7 +539,7 @@ export default function TradesPage() {
       t.strikePrice ?? "",
       t.leverageRatio ?? "",
       t.ratio ?? "",
-      t.returnPct ?? "",
+      tradeReturn(t) ?? "",
       holdDaysFromDates(t.entryDate, t.exitDate) ?? "",
       t.alertTriggered ? "Ja" : "Nein",
       t.notes,
@@ -547,42 +554,21 @@ export default function TradesPage() {
   };
 
   // Summary statistics — memoized so they only recompute when trades array changes
-  const { closedTrades, openTrades, avgReturn, winRate, totalInvested, avgHoldDays, annualizedReturn, totalPnL } =
+  const { closedTrades, openTrades, avgReturn, winRate, totalInvested, avgHoldDays, totalPnL, metrics } =
     useMemo(() => {
       const closed = trades.filter((t) => t.exitDate);
       const open = trades.filter((t) => !t.exitDate);
-      const avg = closed.length
-        ? closed.reduce((sum, t) => sum + (t.returnPct ?? 0), 0) / closed.length
-        : 0;
-      const wins = closed.length
-        ? closed.filter((t) => (t.returnPct ?? 0) > 0).length / closed.length
-        : 0;
-      const invested = open.reduce(
-        (sum, t) => sum + (t.entryPrice && t.quantity ? t.entryPrice * t.quantity : 0),
-        0
-      );
-      const holdDays = closed.length
-        ? closed.reduce((sum, t) => sum + Math.max(holdDaysFromDates(t.entryDate, t.exitDate) ?? 1, 1), 0) / closed.length
-        : 0;
-      const annualized =
-        closed.length && holdDays > 0
-          ? (Math.pow(1 + avg / 100, 365 / holdDays) - 1) * 100
-          : 0;
-      const pnl = closed.reduce((sum, t) => {
-        if (t.entryPrice && t.exitPrice && t.quantity) {
-          return sum + (t.exitPrice - t.entryPrice) * t.quantity;
-        }
-        return sum;
-      }, 0);
+      const metrics = calcPerformanceMetrics(trades);
+      const invested = open.reduce((sum, t) => sum + (t.entryPrice != null && t.entryPrice > 0 && t.quantity != null && t.quantity > 0 ? t.entryPrice * t.quantity : 0), 0);
       return {
         closedTrades: closed,
         openTrades: open,
-        avgReturn: avg,
-        winRate: wins,
+        avgReturn: metrics.avgReturn,
+        winRate: metrics.winRate,
         totalInvested: invested,
-        avgHoldDays: holdDays,
-        annualizedReturn: annualized,
-        totalPnL: pnl,
+        avgHoldDays: metrics.avgHoldDays,
+        totalPnL: metrics.totalPnlEur,
+        metrics,
       };
     }, [trades]);
 
@@ -630,7 +616,7 @@ export default function TradesPage() {
           {openTrades.map((trade) => {
             const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
             const abstand = trade.entryVix && trade.barrierLevel
-              ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+              ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
             const livePrice = livePrices[trade.certificateId];
             const bid = livePrice?.bid ?? null;
             const pnlPct = bid != null && trade.entryPrice != null && trade.entryPrice > 0
@@ -740,6 +726,9 @@ export default function TradesPage() {
         </div>
       )}
 
+      {metrics.invalidDateTrades > 0 && <p className="text-xs text-[#F59E0B]">{metrics.invalidDateTrades} Trade(s) mit Ausstieg vor Einstieg oder ungültigem Datum von Kennzahlen ausgeschlossen. Historische Einträge bleiben unverändert.</p>}
+      <p className="text-xs text-[#8B8FA8]">Historische Zertifikatsrenditen und realisierter G/V vor Gebühren. Kein berechneter Depotwert; Strategiekapital und Ausführungen unter Analytics / Signale.</p>
+      {tradesError && <p className="text-sm text-[#F59E0B]">Trades konnten nicht geladen werden. Angezeigte ältere Werte können veraltet sein.</p>}
       {/* Summary Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <Card>
@@ -753,33 +742,29 @@ export default function TradesPage() {
         <Card>
           <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Win Rate</div>
           <div className="text-2xl font-bold" style={{ color: winRate >= 0.5 ? "#22C55E" : "#FF4D4D" }}>
-            {(winRate * 100).toFixed(0)}%
+            {metrics.analyzedTrades ? `${(winRate * 100).toFixed(0)}%` : "—"}
           </div>
         </Card>
         <Card>
           <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Rendite</div>
           <div className="text-2xl font-bold" style={{ color: avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {formatPct(avgReturn)}
+            {metrics.analyzedTrades ? formatPct(avgReturn) : "—"}
           </div>
         </Card>
         <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Annualisiert</div>
-          <div className="text-2xl font-bold" style={{ color: annualizedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {closedTrades.length > 0 && avgHoldDays >= 3
-              ? `${annualizedReturn >= 0 ? "+" : ""}${Math.abs(annualizedReturn) > 999 ? ">999" : annualizedReturn.toFixed(1)}%`
-              : "—"}
-          </div>
+          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Rendite auswertbar</div>
+          <div className="text-2xl font-bold text-white">{metrics.analyzedTrades} / {metrics.closedTrades}</div>
         </Card>
         <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Gesamt P&L</div>
+          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Realisierter G/V (brutto)</div>
           <div className="text-2xl font-bold" style={{ color: totalPnL >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {closedTrades.length > 0 ? `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(0)} €` : "—"}
+            {metrics.tradesWithEurData > 0 ? `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(0)} €` : "—"}
           </div>
         </Card>
         <Card>
           <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Haltetage</div>
           <div className="text-2xl font-bold text-white">
-            {avgHoldDays > 0 ? avgHoldDays.toFixed(0) : "—"}
+            {closedTrades.length > metrics.invalidDateTrades ? avgHoldDays.toFixed(1) : "—"}
           </div>
         </Card>
         <Card>
@@ -798,7 +783,7 @@ export default function TradesPage() {
           </div>
         ) : trades.length === 0 ? (
           <div className="py-12 text-center rounded-2xl" style={{ background: "#141418", border: "1px solid #1E1E28" }}>
-            <p style={{ color: "#8B8FA8" }} className="mb-3 text-sm">Noch keine Trades erfasst</p>
+            <p style={{ color: "#8B8FA8" }} className="mb-3 text-sm">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
             <Button variant="primary" size="sm" onClick={openNew}>
               <Plus size={14} />
               Ersten Trade anlegen
@@ -828,7 +813,7 @@ export default function TradesPage() {
           </div>
         ) : trades.length === 0 ? (
           <div className="py-12 text-center">
-            <p style={{ color: "#8B8FA8" }} className="mb-3">Noch keine Trades erfasst</p>
+            <p style={{ color: "#8B8FA8" }} className="mb-3">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
             <Button variant="primary" size="sm" onClick={openNew}>
               <Plus size={14} />
               Ersten Trade anlegen

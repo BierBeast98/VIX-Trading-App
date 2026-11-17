@@ -2,12 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAlertCount } from "@/lib/hooks/use-alert-count";
 import {
   LayoutDashboard,
   BarChart3,
   Briefcase,
-  Bell,
   BellRing,
 } from "lucide-react";
 
@@ -15,13 +13,11 @@ const tabs = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/trades", label: "Positionen", icon: Briefcase },
-  { href: "/alerts", label: "Alerts", icon: Bell, showBadge: true },
   { href: "/signals", label: "Signale", icon: BellRing },
 ];
 
 export function BottomTabBar() {
   const pathname = usePathname();
-  const unacknowledgedCount = useAlertCount();
 
   return (
     <nav
@@ -34,7 +30,7 @@ export function BottomTabBar() {
         paddingTop: 4,
       }}
     >
-      {tabs.map(({ href, label, icon: Icon, showBadge }) => {
+      {tabs.map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href || pathname.startsWith(href + "/");
         return (
           <Link
@@ -47,14 +43,7 @@ export function BottomTabBar() {
                 size={20}
                 style={{ color: isActive ? "#B8E15A" : "#8B8FA8" }}
               />
-              {showBadge && unacknowledgedCount > 0 && (
-                <span
-                  className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white"
-                  style={{ background: "#FF4D4D" }}
-                >
-                  {unacknowledgedCount}
-                </span>
-              )}
+
             </div>
             <span
               className="text-[10px] font-medium"

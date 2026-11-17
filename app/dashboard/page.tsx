@@ -1,15 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { StrategyCapital } from "@/components/dashboard/strategy-capital";
 import useSWR, { useSWRConfig } from "swr";
 import dynamic from "next/dynamic";
-import { TrendingUp, TrendingDown, RefreshCw, Activity, Bell as BellIcon, X } from "lucide-react";
+import { TrendingUp, TrendingDown, RefreshCw, Bell as BellIcon, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatNumber, formatPct, formatDateTime } from "@/lib/utils";
 import { getRefreshInterval } from "@/lib/trading-hours";
-import { ALERT_TYPE_META, type AlertType } from "@/lib/alert-types";
 
 // Recharts (~200 KB) aus dem Seiten-Bundle halten — Charts laden nach der Hydration nach.
 // Platzhalter mit fixer Höhe verhindern Layout-Shift beim Nachladen.
@@ -97,6 +97,7 @@ interface Position {
   trailingStopFloor: number | null;
   peakPnlPct: number | null;
   trades: Array<{
+    exitDate: string | null;
     strikePrice: number | null;
     ratio: number | null;
     quantity: number | null;
@@ -105,6 +106,8 @@ interface Position {
 
 interface Trade {
   id: string;
+  positionId: string | null;
+  notes: string;
   certificateId: string;
   direction: "long" | "short";
   entryDate: string;
@@ -118,15 +121,6 @@ interface Trade {
   exitPrice: number | null;
   quantity: number | null;
   returnPct: number | null;
-}
-
-interface AlertLog {
-  id: string;
-  alertType: string;
-  message: string;
-  vixLevel: number | null;
-  sentAt: string;
-  acknowledged: boolean;
 }
 
 type Period = "1d" | "1w" | "1m" | "3m" | "1y" | "5y" | "10y";
@@ -151,7 +145,6 @@ interface VontobelPrice {
 export default function DashboardPage() {
   const [period, setPeriod] = useState<Period>("1d");
   const [refreshing, setRefreshing] = useState(false);
-  const [closingId, setClosingId] = useState<string | null>(null);
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
@@ -166,8 +159,7 @@ export default function DashboardPage() {
   const { data: positions = [] } = useSWR<Position[]>("/api/positions", { refreshInterval: getRefreshInterval() });
   const { data: trades = [] } = useSWR<Trade[]>("/api/trades", { refreshInterval: getRefreshInterval() });
   const openTrades = useMemo(() => trades.filter((t) => !t.exitDate), [trades]);
-  const { data: alertsData } = useSWR<{ alerts: AlertLog[] }>("/api/alerts?limit=10");
-  const alerts = alertsData?.alerts ?? [];
+
   const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
 
   // Batch: Vontobel prices + intraday for all positions in a single request
@@ -191,7 +183,7 @@ export default function DashboardPage() {
     },
     { refreshInterval: getRefreshInterval() }
   );
-  const positionPrices = batchData?.prices ?? {};
+  const positionPrices = useMemo(() => batchData?.prices ?? {}, [batchData?.prices]);
   const certIntraday = batchData?.intraday ?? {};
 
   const loading = !vixData && !intraday;
@@ -209,11 +201,12 @@ export default function DashboardPage() {
     for (const pos of positions) {
       const vPrice = positionPrices[pos.certificateId];
       const bid = vPrice?.bid ?? null;
-      const trade = pos.trades[0];
+      const trade = pos.trades.find(t => !t.exitDate);
       const pnlPct = bid != null && pos.entryPrice > 0
         ? (bid - pos.entryPrice) / pos.entryPrice * 100 : null;
-      const pnlEur = bid != null && pos.entryPrice > 0 && trade?.quantity
-        ? (bid - pos.entryPrice) * trade.quantity : null;
+      const quantity = pos.trades.filter(t => !t.exitDate).reduce((sum, t) => sum + (t.quantity ?? 0), 0);
+      const pnlEur = bid != null && pos.entryPrice > 0 && quantity > 0
+        ? (bid - pos.entryPrice) * quantity : null;
       result[pos.id] = { bid, underlying: vPrice?.underlying ?? null, pnlPct, pnlEur, trade };
     }
     return result;
@@ -240,63 +233,14 @@ export default function DashboardPage() {
     setRefreshing(false);
   };
 
-  const handleClosePosition = async (pos: Position) => {
-    const ok = window.confirm(
-      `Position ${pos.certificateId} (${pos.direction.toUpperCase()}) wirklich schließen?\n\nSie verschwindet dann aus den offenen Positionen und dem iPhone-Widget.`
-    );
-    if (!ok) return;
-    setClosingId(pos.id);
-    try {
-      const res = await fetch(`/api/positions/${pos.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Schließen fehlgeschlagen");
-      await globalMutate(
-        (key: unknown) => typeof key === "string" && key.startsWith("/api/positions"),
-        undefined,
-        { revalidate: true }
-      );
-    } catch (err) {
-      console.error(err);
-      window.alert("Position konnte nicht geschlossen werden. Bitte erneut versuchen.");
-    } finally {
-      setClosingId(null);
-    }
+  // Closing is a real broker execution: collect actual price/date in the editor.
+  const handleCloseTrade = (trade: Trade) => {
+    window.location.assign(trade.notes?.startsWith("signal:") ? "/signals" : `/trades?edit=${encodeURIComponent(trade.id)}`);
   };
-
-  // Mobile-Karte basiert auf Trades — Schließen über die Trade-PUT-Route, die
-  // serverseitig auch die verknüpfte Position auf "closed" setzt (→ raus aus
-  // offenen Positionen + iPhone-Widget). Bleibt als abgeschlossener Trade in der Historie.
-  const handleCloseTrade = async (trade: Trade, liveBid: number | null) => {
-    const ok = window.confirm(
-      `Position ${trade.certificateId} (${trade.direction.toUpperCase()}) schließen?\n\nSie verschwindet aus den offenen Positionen und dem iPhone-Widget und wandert in die Trade-Historie.`
-    );
-    if (!ok) return;
-    setClosingId(trade.id);
-    try {
-      const res = await fetch(`/api/trades/${trade.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          exitDate: new Date().toISOString(),
-          // entryPrice mitschicken, damit der Server returnPct berechnet (für Analytics/Backtest)
-          ...(trade.entryPrice != null ? { entryPrice: trade.entryPrice } : {}),
-          ...(liveBid != null ? { exitPrice: liveBid } : {}),
-        }),
-      });
-      if (!res.ok) throw new Error("Schließen fehlgeschlagen");
-      await globalMutate(
-        (key: unknown) =>
-          (typeof key === "string" &&
-            (key.startsWith("/api/trades") || key.startsWith("/api/positions"))) ||
-          (Array.isArray(key) && key[0] === "vontobel-batch"),
-        undefined,
-        { revalidate: true }
-      );
-    } catch (err) {
-      console.error(err);
-      window.alert("Position konnte nicht geschlossen werden. Bitte erneut versuchen.");
-    } finally {
-      setClosingId(null);
-    }
+  const handleClosePosition = (pos: Position) => {
+    const trade = openTrades.find(t => t.positionId === pos.id);
+    if (trade) handleCloseTrade(trade);
+    else window.location.assign("/trades");
   };
 
   const handlePeriodChange = (p: Period) => {
@@ -310,9 +254,6 @@ export default function DashboardPage() {
   const rollingMean = parseFloat(vixData?.rollingMean ?? "0");
   const rollingWindowDays = vixData?.rollingWindowDays ?? 30;
   const spread = vixData?.spread;
-
-  // Vontobel VIX Future — take underlying from any position
-  const vontobelUnderlying = Object.values(positionPrices).find((p) => p.underlying != null)?.underlying ?? null;
 
   const getVixZone = (price: number) => {
     if (price <= 14) return { label: "Sehr Niedrig", variant: "success" as const };
@@ -360,6 +301,8 @@ export default function DashboardPage() {
             <RefreshCw size={16} className={refreshing ? "animate-spin" : ""} style={{ color: "#8B8FA8" }} />
           </button>
         </div>
+
+        <StrategyCapital />
 
         {/* Hero VIX SPOT Card */}
         <div
@@ -553,11 +496,11 @@ export default function DashboardPage() {
             {openTrades.map((trade) => {
               const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
               const abstand = trade.entryVix && trade.barrierLevel
-                ? ((trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
+                ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
               const liveBid = positionPrices[trade.certificateId]?.bid ?? null;
-              const pnlPct = liveBid && trade.entryPrice
+              const pnlPct = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0
                 ? ((liveBid - trade.entryPrice) / trade.entryPrice) * 100 : null;
-              const pnlEur = liveBid && trade.entryPrice && trade.quantity
+              const pnlEur = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0 && trade.quantity
                 ? (liveBid - trade.entryPrice) * trade.quantity : null;
               return (
                 <div
@@ -644,14 +587,13 @@ export default function DashboardPage() {
                     </span>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleCloseTrade(trade, liveBid)}
-                        disabled={closingId === trade.id}
+                        onClick={() => handleCloseTrade(trade)}
                         aria-label="Position schließen"
                         className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40"
                         style={{ background: "#1E1E28", color: "#FF4D4D" }}
                       >
                         <X size={13} />
-                        {closingId === trade.id ? "Schließt…" : "Schließen"}
+                        Ausführung erfassen
                       </button>
                       <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: "#B8E15A" }}>
                         <BellIcon size={14} className="text-black" />
@@ -687,6 +629,8 @@ export default function DashboardPage() {
             Aktualisieren
           </Button>
         </div>
+
+        <StrategyCapital />
 
         {/* VIX Metrics Row */}
         <div className="grid grid-cols-4 gap-4">
@@ -905,8 +849,7 @@ export default function DashboardPage() {
                           </div>
                           <button
                             onClick={() => handleClosePosition(pos)}
-                            disabled={closingId === pos.id}
-                            title="Position schließen"
+                            title="Tatsächliche Ausführung erfassen"
                             aria-label="Position schließen"
                             className="p-1 rounded-md transition-colors hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
                             style={{ color: "#8B8FA8" }}
@@ -952,34 +895,11 @@ export default function DashboardPage() {
 
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-sm font-semibold text-white">Letzte Alerts</CardTitle>
-                {alerts.filter((a) => !a.acknowledged).length > 0 && (
-                  <Badge variant="danger">{alerts.filter((a) => !a.acknowledged).length} neu</Badge>
-                )}
-              </div>
-              <a href="/alerts" className="text-xs font-medium transition-colors" style={{ color: "#B8E15A" }}>Alle anzeigen →</a>
+              <CardTitle className="text-sm font-semibold text-white">Manuelle Handelssignale</CardTitle>
+              <a href="/signals" className="text-xs font-medium text-[#B8E15A]">Signalbereich öffnen →</a>
             </CardHeader>
-            {alerts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-6 gap-2">
-                <Activity size={24} style={{ color: "#8B8FA8" }} />
-                <p className="text-sm" style={{ color: "#8B8FA8" }}>Keine Alerts</p>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-[240px] overflow-y-auto">
-                {alerts.slice(0, 8).map((alert) => {
-                  return (
-                    <div key={alert.id} className="flex gap-3 p-2.5 rounded-lg" style={{ background: "#1A1A22" }}>
-                      <div className="mt-0.5 h-2 w-2 rounded-full flex-shrink-0" style={{ background: ALERT_TYPE_META[alert.alertType as AlertType]?.color ?? "#8B8FA8" }} />
-                      <div className="min-w-0">
-                        <p className="text-xs text-white leading-snug line-clamp-2">{alert.message}</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#4A4A5A" }}>{formatDateTime(alert.sentAt)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <p className="text-sm text-[#8B8FA8]">Kauf- und Verkaufssignale prüfen, beim Broker selbst ausführen und die tatsächliche Ausführung mit Kurs, Stückzahl, Gebühren und Datum bestätigen.</p>
+            <p className="mt-3 text-xs text-[#8B8FA8]">Überwachungsstatus, Zustellung und Ausführungshistorie stehen im geschützten Signalbereich.</p>
           </Card>
         </div>
       </div>

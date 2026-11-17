@@ -9,8 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
-// Alert-Schwellen und Trade-Management werden auf der Alerts-Seite konfiguriert (/alerts)
-
 interface Settings {
   id: number;
   alertEmail: string;
@@ -108,7 +106,7 @@ export default function SettingsPage() {
           </CardHeader>
           <div className="space-y-4">
             <Input
-              label="Alert E-Mail Adresse"
+              label="E-Mail-Adresse für Benachrichtigungen"
               type="email"
               value={settings.alertEmail}
               onChange={(e) => update("alertEmail", e.target.value)}
@@ -144,25 +142,24 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        {/* Hinweis: Alert-Konfiguration umgezogen */}
+        {/* Handelssignale */}
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
               <Bell size={16} style={{ color: "#B8E15A" }} />
-              <CardTitle className="text-sm font-semibold text-white">Alert-Regeln</CardTitle>
+              <CardTitle className="text-sm font-semibold text-white">Handelssignale</CardTitle>
             </div>
           </CardHeader>
           <div className="space-y-3">
             <p className="text-sm" style={{ color: "#8B8FA8" }}>
-              Alle Alert-Schwellen (Einstieg, Gewinnziel, Trailing Stop, Spike, Statistik, Events)
-              werden jetzt direkt auf der Alerts-Seite konfiguriert.
+              Konfiguration und Verlauf der manuellen Handelssignale findest du im Signalbereich.
             </p>
             <Link
-              href="/alerts"
+              href="/signals"
               className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
               style={{ background: "#1E1E28", color: "#B8E15A" }}
             >
-              Zu den Alert-Regeln
+              Zu den Handelssignalen
               <ArrowRight size={12} />
             </Link>
           </div>

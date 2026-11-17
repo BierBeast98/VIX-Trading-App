@@ -2,17 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
-const CreatePositionSchema = z.object({
-  certificateId: z.string().min(1),
-  name: z.string().default(""),
-  entryVix: z.number(),
-  entryPrice: z.number(),
-  barrierLevel: z.number(),
-  currentBarrier: z.number(),
-  leverageRatio: z.number(),
-  currentPrice: z.number().default(0),
-  notes: z.string().default(""),
-});
+import { createPositionSchema } from "@/lib/trade-validation";
 
 export async function GET() {
   try {
@@ -21,28 +11,29 @@ export async function GET() {
       orderBy: { createdAt: "desc" },
       include: {
         trades: {
+          where: { exitDate: null },
           orderBy: { entryDate: "asc" },
-          take: 1,
-          select: { strikePrice: true, ratio: true, quantity: true },
+          select: { strikePrice: true, ratio: true, quantity: true, exitDate: true },
         },
       },
     });
     return NextResponse.json(positions, {
-      headers: { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
     console.error("[positions GET]", err);
-    return NextResponse.json([]);
+    return NextResponse.json({ error: "Positionen konnten nicht geladen werden" }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const parsed = CreatePositionSchema.parse(body);
-    const position = await prisma.position.create({ data: parsed });
+    const parsed = createPositionSchema.parse(body);
+    const position = await prisma.position.create({ data: { ...parsed, currentPrice: parsed.currentPrice ?? parsed.entryPrice } });
     return NextResponse.json(position, { status: 201 });
   } catch (err) {
+    if (err instanceof SyntaxError) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.issues }, { status: 400 });
     }

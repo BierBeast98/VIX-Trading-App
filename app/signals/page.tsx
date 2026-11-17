@@ -5,7 +5,7 @@ import { BellRing, Check, ChevronDown, LockKeyhole, RefreshCw, Send, ShieldCheck
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { type State, type Config, type Signal, roundMetrics, marketOpen } from '@/lib/signals/engine';
-type Payload = State & { channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
+type Payload = State & { capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
 const euro = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 const time = (s: string) => new Date(s).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' });
 const panel = 'rounded-2xl border border-[#1E1E28] bg-[#141418] p-5';
@@ -110,8 +110,8 @@ export default function SignalsPage() {
     <section><div className="mb-4 flex items-center gap-2"><BellRing size={18} className="text-[#B8E15A]" /><h2 className="text-lg font-semibold text-white">Jetzt zu beachten</h2></div><div className="space-y-4">{pending.length ? pending.map(s => <SignalCard key={s.id} signal={s} onDone={refresh} />) : <div className={`${panel} py-9 text-center`}><ShieldCheck className="mx-auto mb-3 text-[#8B8FA8]" size={30} /><p className="font-medium text-white">Kein offenes Handelssignal</p><p className="mt-2 text-sm text-[#8B8FA8]">{data.config.enabled ? 'Die nächste gültige Regelverletzung erscheint hier.' : 'Zuerst Produkt, Brokerzeiten und Versand einrichten.'}</p></div>}</div></section>
     {showConfig && <section className={panel}><h2 className="text-xl font-semibold text-white">Strategie & Benachrichtigungen</h2><p className="mt-2 text-sm text-[#8B8FA8]">Long-Kaskade 30 / 40 / 50 %, maximal 50 % Einsatz. Kein weiterer Kauf bei 12,5. Trailing ab +10 % mit 8 / 6 / 5 % Abstand. {locked && 'Produkt und Strategie sind während offener Signale oder einer Runde gesperrt.'}</p>
       <form className="mt-6 space-y-6" onSubmit={e => { e.preventDefault(); void action(() => request('/api/signals', 'PUT', { ...config, closedDates: config.closedDates.filter(Boolean) }), 'Einrichtung gespeichert'); }}>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Input label="Strategiekapital in EUR" type="number" min="1" step="any" disabled={locked} value={config.capital} onChange={e => set('capital', Number(e.target.value))} />
+        <p className="text-xs text-[#8B8FA8]">Das Strategiekapital wird aus bestätigten Ausführungen fortgeschrieben. Ein- und Auszahlungen bitte zuerst abstimmen.</p><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <Input label="Strategiekapital in EUR" type="number" min="1" step="any" disabled={locked || !!data.capitalManaged} value={config.capital} onChange={e => set('capital', Number(e.target.value))} />
           <Select label="Ausstiegsvariante" disabled={locked} value={config.variant} onChange={e => set('variant', e.target.value as Config['variant'])} options={[{ value: 'A', label: 'A · Zeitverkauf nach 10 Tagen' }, { value: 'B', label: 'B · 80-%-Reduktion / Restposition' }, { value: 'C', label: 'C · B plus 6-%-Rundenlimit' }]} />
           <Select label="Geplanter Einstiegshebel" disabled={locked} value={config.leverage} onChange={e => set('leverage', Number(e.target.value))} options={[1.5, 1.9, 2, 2.3].map(n => ({ value: String(n), label: String(n) }))} />
           <Input label="Long-Zertifikat · ISIN" disabled={locked} value={config.isin} onChange={e => set('isin', e.target.value.toUpperCase().trim())} placeholder="Geprüftes aktives EUR-Produkt" />

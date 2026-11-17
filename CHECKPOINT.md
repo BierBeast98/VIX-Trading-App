@@ -370,3 +370,24 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Collector unabhängig von pausierten Handelsregeln, vorgesehen alle fünf Minuten Mo–Fr 08–22 Berlin mit bekannten Schließtagen und eigener minimaler Cron-Berechtigung. Budget/Strategie/Überwachung unverändert pausiert.
 - Neun Archiv-Tests, separater DB-Test (konkurrierende Collector-Läufe, persistierte Abrufe/Deduplizierung/Fehler) und HTTP-Exporttest mit 2.005 Zeilen über drei Seiten bestanden; 33 bestehende Tests unverändert erfolgreich. Desktop/390px-Ansicht geprüft, horizontalen Layoutüberlauf durch `min-w-0` am Hauptbereich behoben.
 - Details und Einschränkungen: `docs/ARCHIVE.md`. Produktionseinrichtung/erster echter Sammellauf werden nach Veröffentlichung verifiziert.
+
+### Archiv in Produktion verifiziert (17.11.2026)
+
+- Commit `a5beb81` auf vix-trading.de erfolgreich bereitgestellt, Hostinger-Build `01a1e9ea-c477-72eb-8fe0-e3655f34f8ce` completed.
+- Unabhängiger Hostinger-Cron `hUV5xHZ4N0`, alle fünf Minuten; Server begrenzt auf Mo–Fr 08–22 Berlin und konfigurierte Schließtage. Dedizierte Collector-Berechtigung, kein Zugriff auf Signaladministration/Exporte.
+- Erster **automatischer** Lauf am 17.11.2026 14:40:01 UTC / 15:40 Berlin: completed, 3 Quellenabrufe, 0 Fehler. Keine manuelle HTTP-Auslösung hierfür. Datenbank bestätigte persistierten Lauf, Abrufe und Beobachtungen.
+- Handelsüberwachung weiterhin false. Archiv läuft unabhängig davon.
+
+## UI und Kapitalbereinigung (17.11.2026)
+
+- Nutzer beauftragt Umstellung auf Signale → eigene Broker-Ausführung → bestätigte Erfassung. Dashboard/Analytics/Positionen bleiben, Alert-Seite entfällt; `/alerts` leitet auf `/signals` weiter, alle Alert-Menüs/Badgeabfragen entfernt.
+- Drei Subagenten für Berechnungen, Navigation und Buchungsintegrität; anschließend unabhängiges Kapitalreview integriert.
+- Neue datierte Kapitalbasis **1.500 EUR**, Stand **2026-11-17T14:36:34.642Z**. 0 offene Positionen/0 Signalausführungen → aktuell und verfügbar 1.500 EUR. Settings.riskBudget ebenfalls 1.500. Vorheriger Legacy-Kontostand (3.700 EUR), Risikobudget (10.000 EUR) und geänderte Positionswerte unter `capital_reconciliation_20261117` gesichert. Keine historischen Trades gelöscht.
+- Fünf geschlossene Positionen anhand ihres jeweils einzigen abgeschlossenen verknüpften Trades bei Ein-/Ausstiegspreisen synchronisiert. Geschlossene Position ohne eindeutigen Trade unverändert.
+- Kapital-API rechnet bestätigte Kauf-/Verkaufscashflows seit Basis plus verbleibende Lot-Anschaffungskosten, inklusive bestätigter Gebühren. Buchwert, verfügbarer Betrag und gebundener Einstand separat. Keine alte Historie in neue Basis eingerechnet. Kapitaländerung über freie Kontostand-/Signaleingabe gesperrt, bis Ein-/Auszahlung explizit abgestimmt wird.
+- Historische Kennzahlen leiten Zertifikatrendite aus tatsächlichen Kursen ab (inklusive 0 EUR / −100 %), keine doppelte Richtungsumkehr bei Short-Zertifikaten. Keine unbelegte Depotverzinsung/Jahresrendite. Alte Euro-Ergebnisse ausdrücklich brutto, neue Signal-Kapitalrechnung netto.
+- **Offen:** DE000VU4MAY5 hat Einstieg 23.03.2026 und Ausstieg 09.03.2026. Originaldaten erhalten, von Kennzahlen ausgeschlossen und Hinweis sichtbar. Korrektes Datum braucht Beleg/Nutzerangabe. Daher 7 historische Trades, 6 auswertbar, brutto −332,22 EUR aus diesen sechs; keine Aussage über die neue Strategie.
+- Buchungs-APIs prüfen Datumsfolge/Preise/Stückzahl, berechnen bei Einzelkursänderung neu, speichern Trade/Position atomar und erkennen Totalverlust. Kein automatischer Positionsverkauf anhand Cachekurs; UI verweist auf Erfassung tatsächlicher Ausführung. Signalpositionen weiterhin gegen alte Editoren geschützt.
+- Vereinfachtes historisches Spot-Modell ausdrücklich keine Simulation der neuen Signalstrategie; Kalenderdauer, Trailing-Floor, −100-%-Grenze und Drawdown korrigiert. VIX3M nicht mehr als echter VX zugemischt.
+- 31 neue Finanz-/API-/Kapitaltests erfolgreich; 33 Signal-/Telegramtests und 9 Archivtests erfolgreich. Produktionsbuild/TypeScript und gezieltes ESLint erfolgreich; mobile/desktop Analytics und Positionshistorie lokal mit kopierten Bestandsdaten geprüft. Finale integrierte Bereitstellung und Live-Prüfung folgen.
+- Details: `docs/CAPITAL.md`. Überwachung pausiert, Produkt nicht freigegeben; keine Broker-Order ausgeführt.

@@ -1,75 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { updateTradeSchema, tradeDerivedValues } from "@/lib/trade-validation";
 
-const UpdateTradeSchema = z.object({
-  certificateId: z.string().optional(),
-  direction: z.enum(["long", "short"]).optional(),
-  entryDate: z.string().optional(),
-  exitDate: z.string().optional().nullable(),
-  entryVix: z.number().optional().nullable(),
-  exitVix: z.number().optional().nullable(),
-  barrierLevel: z.number().optional(),
-  strikePrice: z.number().optional().nullable(),
-  leverageRatio: z.number().optional().nullable(),
-  ratio: z.number().optional().nullable(),
-  entryPrice: z.number().optional().nullable(),
-  exitPrice: z.number().optional().nullable(),
-  quantity: z.number().int().optional().nullable(),
-  returnPct: z.number().optional().nullable(),
-  holdDays: z.number().optional().nullable(),
-  alertTriggered: z.boolean().optional(),
-  notes: z.string().optional(),
-});
+const managedError = "Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen";
+class TradeError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const managed = await prisma.trade.findUnique({ where: { id } });
-    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
-    const body = await req.json();
-    const parsed = UpdateTradeSchema.parse(body);
-
-    const updateData: Record<string, unknown> = { ...parsed };
-    if (parsed.entryDate) updateData.entryDate = new Date(parsed.entryDate);
-    if (parsed.exitDate) updateData.exitDate = new Date(parsed.exitDate);
-
-    // Auto-calculate returnPct from entry/exit prices if both are present
-    if (parsed.entryPrice && parsed.exitPrice) {
-      updateData.returnPct = ((parsed.exitPrice - parsed.entryPrice) / parsed.entryPrice) * 100;
-    }
-
-    // Haltedauer immer aus den (ggf. aktualisierten) Daten neu berechnen.
-    // Fehlende Datumsfelder aus dem bestehenden Trade ergänzen.
-    const existing = await prisma.trade.findUnique({ where: { id } });
-    if (existing) {
-      const entry = (updateData.entryDate as Date) ?? existing.entryDate;
-      const exit = (updateData.exitDate as Date | undefined) ?? existing.exitDate;
-      updateData.holdDays = exit
-        ? Math.round((new Date(exit).getTime() - new Date(entry).getTime()) / 86_400_000)
-        : null;
-    }
-
-    const trade = await prisma.trade.update({
-      where: { id },
-      data: updateData,
+    const parsed = updateTradeSchema.parse(await req.json());
+    const trade = await prisma.$transaction(async (tx) => {
+      const existing = await tx.trade.findUnique({ where: { id }, include: { position: true } });
+      if (!existing) throw new TradeError("Trade not found", 404);
+      if (existing.notes.startsWith("signal:") || existing.position?.notes.startsWith("signal:")) throw new TradeError(managedError, 409);
+      const entryDate = parsed.entryDate !== undefined ? new Date(parsed.entryDate) : existing.entryDate;
+      const exitDate = parsed.exitDate !== undefined ? (parsed.exitDate === null ? null : new Date(parsed.exitDate)) : existing.exitDate;
+      const merged = { ...existing, ...parsed, entryDate, exitDate };
+      if ((parsed.entryPrice !== undefined || parsed.exitPrice !== undefined) && parsed.returnPct === undefined) merged.returnPct = null;
+      const data = {
+        ...parsed, entryDate, exitDate,
+        entryVix: parsed.entryVix === null ? 0 : (parsed.entryVix ?? existing.entryVix),
+        ...(!exitDate ? { exitPrice: null, exitVix: null } : {}),
+        ...tradeDerivedValues(merged),
+      };
+      const updated = await tx.trade.update({ where: { id }, data });
+      if (updated.positionId) {
+        const siblings = await tx.trade.findMany({ where: { positionId: updated.positionId } });
+        const hasOpen = siblings.some(t => t.exitDate === null);
+        await tx.position.update({ where: { id: updated.positionId }, data: {
+          status: hasOpen ? "open" : "closed",
+          ...(siblings.length === 1 ? {
+            certificateId: updated.certificateId, direction: updated.direction,
+            entryPrice: updated.entryPrice ?? 0, entryVix: updated.entryVix,
+            barrierLevel: updated.barrierLevel,
+            ...(updated.leverageRatio != null ? { leverageRatio: updated.leverageRatio } : {}),
+          } : {}),
+          ...(!hasOpen && updated.exitPrice != null ? { currentPrice: updated.exitPrice } : {}),
+          ...(hasOpen && existing.exitDate !== null ? { currentPrice: updated.entryPrice ?? 0 } : {}),
+        } });
+      }
+      return updated;
     });
-
-    // If trade now has a real exitDate, close the linked position
-    // If exitDate was removed (null), reopen it
-    if (trade.positionId) {
-      const hasExit = trade.exitDate != null;
-      await prisma.position.update({
-        where: { id: trade.positionId },
-        data: { status: hasExit ? "closed" : "open" },
-      }).catch((e) => console.error("[trades PUT] position status sync:", e));
-    }
-
     return NextResponse.json(trade);
   } catch (err) {
-    if (err instanceof z.ZodError) {
-      return NextResponse.json({ error: err.issues }, { status: 400 });
-    }
+    if (err instanceof SyntaxError) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    if (err instanceof z.ZodError) return NextResponse.json({ error: err.issues }, { status: 400 });
+    if (err instanceof TradeError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
@@ -78,16 +57,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const managed = await prisma.trade.findUnique({ where: { id } });
-    if (managed?.notes.startsWith('signal:')) return NextResponse.json({ error: 'Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen' }, { status: 409 });
-    const trade = await prisma.trade.findUnique({ where: { id } });
-    await prisma.trade.delete({ where: { id } });
-    // Also delete linked position if it exists
-    if (trade?.positionId) {
-      await prisma.position.delete({ where: { id: trade.positionId } }).catch((e) => console.error("[trades DELETE] linked position delete:", e));
-    }
+    await prisma.$transaction(async (tx) => {
+      const trade = await tx.trade.findUnique({ where: { id }, include: { position: true } });
+      if (!trade) throw new TradeError("Trade not found", 404);
+      if (trade.notes.startsWith("signal:") || trade.position?.notes.startsWith("signal:")) throw new TradeError(managedError, 409);
+      await tx.trade.delete({ where: { id } });
+      if (trade.positionId) {
+        const remaining = await tx.trade.findMany({ where: { positionId: trade.positionId } });
+        if (remaining.length === 0) await tx.position.delete({ where: { id: trade.positionId } });
+        else await tx.position.update({ where: { id: trade.positionId }, data: { status: remaining.some(t => t.exitDate === null) ? "open" : "closed" } });
+      }
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
+    if (err instanceof TradeError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error(err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

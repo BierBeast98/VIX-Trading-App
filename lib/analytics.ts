@@ -1,24 +1,22 @@
-import { calcSharpeRatio } from "./utils";
+import { calcSharpeRatio, calcStepFloor } from "./utils";
+import { holdingDays, tradeReturn, tradePnl, type TradeValues } from "./trade-metrics";
 
-export interface TradeRecord {
+export interface TradeRecord extends TradeValues {
   id: string;
   certificateId: string;
-  entryDate: Date;
-  exitDate?: Date | null;
   entryVix: number;
   exitVix?: number | null;
   barrierLevel: number;
-  returnPct?: number | null;
   holdDays?: number | null;
-  entryPrice?: number | null;
-  exitPrice?: number | null;
-  quantity?: number | null;
   alertTriggered: boolean;
 }
 
 export interface PerformanceMetrics {
   totalTrades: number;
   closedTrades: number;
+  analyzedTrades: number;
+  invalidDateTrades: number;
+  missingReturnTrades: number;
   winCount: number;
   lossCount: number;
   winRate: number;
@@ -26,122 +24,61 @@ export interface PerformanceMetrics {
   avgWin: number;
   avgLoss: number;
   avgHoldDays: number;
+  /** Per-trade mean / standard deviation, not an annualized account Sharpe. */
   sharpeRatio: number;
   bestTrade: number;
   worstTrade: number;
-  /** Naive Summe aller Einzelrenditen (%) — additive Sicht */
+  /** Sum of certificate returns, not an account return. */
   totalReturn: number;
-  /** Kumulierte/verzinste Gesamtrendite (%) — ∏(1+rᵢ)−1, wie sich das Kapital über die Zeit entwickelt hat */
-  compoundReturn: number;
-  /** Auf ein Jahr hochgerechnete Rendite (%) — (1+compound)^(365.25/Tage)−1 */
-  annualizedReturn: number;
-  /** Kalendertage vom ersten Einstieg bis zum letzten Ausstieg */
+  /** Account returns require a dated account baseline and cash-flow history. */
+  compoundReturn: null;
+  annualizedReturn: null;
   periodDays: number;
-  /** ISO-Datum des ersten Einstiegs (oder null) */
   firstTradeDate: string | null;
-  /** ISO-Datum des letzten Ausstiegs (oder null) */
   lastTradeDate: string | null;
-  /** Realisierter Gewinn/Verlust in € — Σ (exit−entry)×Stück über Trades mit vollständigen Daten */
+  /** Gross realized certificate P&L; legacy records do not track fees reliably. */
   totalPnlEur: number;
-  /** Anzahl Trades mit vollständigen €-Daten (entry, exit, quantity) */
   tradesWithEurData: number;
   alertTriggeredCount: number;
   earlyExitCount: number;
 }
 
 export function calcPerformanceMetrics(trades: TradeRecord[]): PerformanceMetrics {
-  const closed = trades.filter((t) => t.exitDate && t.returnPct !== null && t.returnPct !== undefined);
-
-  if (closed.length === 0) {
-    return {
-      totalTrades: trades.length,
-      closedTrades: 0,
-      winCount: 0,
-      lossCount: 0,
-      winRate: 0,
-      avgReturn: 0,
-      avgWin: 0,
-      avgLoss: 0,
-      avgHoldDays: 0,
-      sharpeRatio: 0,
-      bestTrade: 0,
-      worstTrade: 0,
-      totalReturn: 0,
-      compoundReturn: 0,
-      annualizedReturn: 0,
-      periodDays: 0,
-      firstTradeDate: null,
-      lastTradeDate: null,
-      totalPnlEur: 0,
-      tradesWithEurData: 0,
-      alertTriggeredCount: 0,
-      earlyExitCount: 0,
-    };
-  }
-
-  const returns = closed.map((t) => t.returnPct!);
-  const wins = returns.filter((r) => r > 0);
-  const losses = returns.filter((r) => r < 0);
-  // Haltedauer aus den Daten ableiten (gespeichertes holdDays kann null/veraltet sein)
-  const holdDays = closed
-    .map((t) =>
-      t.exitDate
-        ? Math.round((new Date(t.exitDate).getTime() - new Date(t.entryDate).getTime()) / 86_400_000)
-        : 0
-    )
-    .filter((d) => d > 0);
-
-  // Kumulierte (verzinste) Gesamtrendite: Kapital läuft sequentiell durch alle Trades
-  const compoundFactor = closed.reduce((acc, t) => acc * (1 + t.returnPct! / 100), 1);
-  const compoundReturn = (compoundFactor - 1) * 100;
-
-  // Zeitraum: erster Einstieg → letzter Ausstieg
-  const entryTimes = closed.map((t) => new Date(t.entryDate).getTime());
-  const exitTimes = closed.map((t) => new Date(t.exitDate!).getTime());
-  const firstEntry = Math.min(...entryTimes);
-  const lastExit = Math.max(...exitTimes);
-  const periodDays = Math.max(0, (lastExit - firstEntry) / 86_400_000);
-
-  // Annualisierung: aufs Jahr hochgerechnet. Bei Totalverlust (Faktor ≤ 0) → -100 %.
-  let annualizedReturn = 0;
-  if (periodDays >= 1) {
-    annualizedReturn =
-      compoundFactor <= 0
-        ? -100
-        : (Math.pow(compoundFactor, 365.25 / periodDays) - 1) * 100;
-  }
-
-  // Realisierter G/V in € — nur Trades mit vollständigen Daten (Einstieg, Ausstieg, Stückzahl)
-  const eurTrades = closed.filter(
-    (t) => t.entryPrice != null && t.exitPrice != null && t.quantity != null
-  );
-  const totalPnlEur = eurTrades.reduce(
-    (a, t) => a + (t.exitPrice! - t.entryPrice!) * t.quantity!,
-    0
-  );
-
+  const closed = trades.filter(t => t.exitDate != null);
+  const dated = closed.filter(t => holdingDays(t.entryDate, t.exitDate) != null);
+  const evaluated = dated.filter(t => tradeReturn(t) != null);
+  const returns = evaluated.map(t => tradeReturn(t)!);
+  const wins = returns.filter(r => r > 0);
+  const losses = returns.filter(r => r < 0);
+  const average = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+  const eurTrades = dated.filter(t => tradePnl(t) != null);
+  const firstEntry = dated.length ? Math.min(...dated.map(t => new Date(t.entryDate).getTime())) : null;
+  const lastExit = dated.length ? Math.max(...dated.map(t => new Date(t.exitDate!).getTime())) : null;
   return {
     totalTrades: trades.length,
     closedTrades: closed.length,
+    analyzedTrades: evaluated.length,
+    invalidDateTrades: closed.length - dated.length,
+    missingReturnTrades: dated.length - evaluated.length,
     winCount: wins.length,
     lossCount: losses.length,
-    winRate: wins.length / closed.length,
-    avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
-    avgWin: wins.length > 0 ? wins.reduce((a, b) => a + b, 0) / wins.length : 0,
-    avgLoss: losses.length > 0 ? losses.reduce((a, b) => a + b, 0) / losses.length : 0,
-    avgHoldDays: holdDays.length > 0 ? holdDays.reduce((a, b) => a + b, 0) / holdDays.length : 0,
+    winRate: evaluated.length ? wins.length / evaluated.length : 0,
+    avgReturn: average(returns),
+    avgWin: average(wins),
+    avgLoss: average(losses),
+    avgHoldDays: average(dated.map(t => holdingDays(t.entryDate, t.exitDate)!)),
     sharpeRatio: calcSharpeRatio(returns),
-    bestTrade: Math.max(...returns),
-    worstTrade: Math.min(...returns),
+    bestTrade: returns.length ? Math.max(...returns) : 0,
+    worstTrade: returns.length ? Math.min(...returns) : 0,
     totalReturn: returns.reduce((a, b) => a + b, 0),
-    compoundReturn,
-    annualizedReturn,
-    periodDays,
-    firstTradeDate: new Date(firstEntry).toISOString(),
-    lastTradeDate: new Date(lastExit).toISOString(),
-    totalPnlEur,
+    compoundReturn: null,
+    annualizedReturn: null,
+    periodDays: firstEntry != null && lastExit != null ? (lastExit - firstEntry) / 86_400_000 : 0,
+    firstTradeDate: firstEntry != null ? new Date(firstEntry).toISOString() : null,
+    lastTradeDate: lastExit != null ? new Date(lastExit).toISOString() : null,
+    totalPnlEur: eurTrades.reduce((a, t) => a + tradePnl(t)!, 0),
     tradesWithEurData: eurTrades.length,
-    alertTriggeredCount: closed.filter((t) => t.alertTriggered).length,
+    alertTriggeredCount: evaluated.filter(t => t.alertTriggered).length,
     earlyExitCount: 0,
   };
 }
@@ -196,7 +133,7 @@ export function runBacktest(
   history: { date: string; close: number }[],
   params: BacktestParams,
   /** Optional VIX futures history — if provided, P&L is calculated on futures prices.
-   *  Entry signal still uses VIX spot (history). Falls back to spot when no futures price exists. */
+   *  Entry signal still uses VIX spot (history). Requires a complete matching series; otherwise the model returns no trades. */
   futuresHistory?: { date: string; close: number }[]
 ): BacktestResult {
   const { direction, entryThreshold, targetReturnPct, stepPct, maxHoldDays, stopLossPct, knockoutBarrierPct } = params;
@@ -226,6 +163,11 @@ export function runBacktest(
   });
 
   if (history.length < 2) return emptyResult("Nicht genug Daten");
+  if (![entryThreshold, targetReturnPct, stepPct, leverageRatio, maxHoldDays, stopLossPct, knockoutBarrierPct].every(Number.isFinite) || leverageRatio <= 0 || maxHoldDays < 1 || stepPct <= 0) return emptyResult("Ungültige Modellparameter");
+
+  if (history.some((d, index) => !Number.isFinite(Date.parse(d.date)) || !Number.isFinite(d.close) || d.close <= 0 || (index > 0 && Date.parse(d.date) <= Date.parse(history[index - 1].date)))) return emptyResult("Ungültige Kursreihe");
+  // Never splice spot levels into a partially missing futures series.
+  if (futuresHistory && history.some(d => !Number.isFinite(futuresMap.get(d.date)) || futuresMap.get(d.date)! <= 0)) return emptyResult("Unvollständige Futures-Kursreihe");
 
   const periodLabel = `${history[0].date} – ${history[history.length - 1].date}`;
 
@@ -261,11 +203,14 @@ export function runBacktest(
 
       let peakPnl = 0;
       let floor: number | null = null;
-      let exitIdx = Math.min(i + maxHoldDays, history.length - 1);
+      const deadline = Date.parse(history[i].date) + maxHoldDays * 86_400_000;
+      let maxExitIdx = i + 1;
+      while (maxExitIdx < history.length - 1 && Date.parse(history[maxExitIdx].date) < deadline) maxExitIdx++;
+      let exitIdx = maxExitIdx;
       let exitReason: "trailing_stop" | "stop_loss" | "knockout" | "max_hold" = "max_hold";
       let exitCertPnl = 0;
 
-      for (let j = i + 1; j <= Math.min(i + maxHoldDays, history.length - 1); j++) {
+      for (let j = i + 1; j <= maxExitIdx; j++) {
         const currentFuturesVix = getFuturesPrice(history[j].date, history[j].close);
 
         // Knockout check — total loss
@@ -285,12 +230,18 @@ export function runBacktest(
         const vixChangePct = isShort
           ? (entryFuturesVix - currentFuturesVix) / entryFuturesVix * 100
           : (currentFuturesVix - entryFuturesVix) / entryFuturesVix * 100;
-        const certPnl = vixChangePct * leverageRatio;
+        const certPnl = Math.max(-100, vixChangePct * leverageRatio);
+        if (certPnl === -100) {
+          exitCertPnl = -100;
+          exitIdx = j;
+          exitReason = "knockout";
+          break;
+        }
 
         peakPnl = Math.max(peakPnl, certPnl);
 
         // Hard stop-loss
-        if (stopLossPct > 0 && certPnl < -stopLossPct) {
+        if (stopLossPct > 0 && certPnl <= -stopLossPct) {
           exitCertPnl = certPnl;
           exitIdx = j;
           exitReason = "stop_loss";
@@ -299,8 +250,7 @@ export function runBacktest(
 
         // Trailing stop floor
         if (peakPnl >= targetReturnPct && stepPct > 0) {
-          const stepsAbove = Math.floor((peakPnl - targetReturnPct) / stepPct);
-          floor = targetReturnPct - stepPct + stepsAbove * stepPct;
+          floor = calcStepFloor(targetReturnPct, stepPct, peakPnl);
         }
 
         exitCertPnl = certPnl;
@@ -318,7 +268,7 @@ export function runBacktest(
         entryVix: entrySpotVix,
         exitVix: getFuturesPrice(history[exitIdx].date, history[exitIdx].close),
         return: exitCertPnl,
-        holdDays: exitIdx - i,
+        holdDays: (Date.parse(history[exitIdx].date) - Date.parse(history[i].date)) / 86_400_000,
         exitReason,
       });
 
@@ -338,14 +288,14 @@ export function runBacktest(
   const stopLossExits = trades.filter((t) => t.exitReason === "stop_loss").length;
   const knockoutExits = trades.filter((t) => t.exitReason === "knockout").length;
 
+  // Sequential full-allocation model equity; drawdown is relative to the running peak.
   let maxDrawdown = 0;
-  let peak = 0;
-  let cumReturn = 0;
+  let peak = 1;
+  let equity = 1;
   for (const r of returns) {
-    cumReturn += r;
-    if (cumReturn > peak) peak = cumReturn;
-    const dd = peak - cumReturn;
-    if (dd > maxDrawdown) maxDrawdown = dd;
+    equity *= 1 + r / 100;
+    peak = Math.max(peak, equity);
+    maxDrawdown = Math.max(maxDrawdown, (1 - equity / peak) * 100);
   }
 
   return {
@@ -354,7 +304,7 @@ export function runBacktest(
     tradesSimulated: trades.length,
     winRate: wins.length / trades.length,
     avgReturn: returns.reduce((a, b) => a + b, 0) / returns.length,
-    totalReturn: returns.reduce((a, b) => a + b, 0),
+    totalReturn: (equity - 1) * 100,
     avgHoldDays: totalHoldDays / trades.length,
     maxDrawdown,
     trailingStopExits,
@@ -371,42 +321,5 @@ export function runBacktest(
       exitReason: t.exitReason,
       holdDays: t.holdDays,
     })),
-  };
-}
-
-export function suggestPositionSize(
-  riskBudget: number,
-  vixLevel: number,
-  targetReturn: number
-): { allocation: number; reason: string } {
-  // Long-VIX-Spike-Strategie: Einstieg wenn VIX niedrig → Profit bei Spike.
-  // Niedriger VIX = idealer Einstieg = größte Allokation.
-  // Hoher VIX = Spike läuft bereits = kleines Risiko, unattraktiver Einstieg.
-  let pct: number;
-  let reason: string;
-
-  if (vixLevel <= 14) {
-    pct = 0.7;
-    reason = "VIX sehr niedrig — idealer Einstieg, hohes Spike-Potenzial (70%)";
-  } else if (vixLevel <= 16) {
-    pct = 0.6;
-    reason = "VIX niedrig — guter Einstieg, klassische Long-Zone (60%)";
-  } else if (vixLevel <= 20) {
-    pct = 0.4;
-    reason = "VIX moderat — akzeptabler Einstieg, reduzierte Größe (40%)";
-  } else if (vixLevel <= 25) {
-    pct = 0.25;
-    reason = "VIX erhöht — Spike möglicherweise im Gang, kleiner Einstieg (25%)";
-  } else if (vixLevel <= 30) {
-    pct = 0.15;
-    reason = "VIX hoch — ungünstiger Einstiegszeitpunkt, Rückschlagsrisiko (15%)";
-  } else {
-    pct = 0.05;
-    reason = "VIX extrem hoch — Spike läuft bereits, kein neuer Long-Einstieg empfohlen (5%)";
-  }
-
-  return {
-    allocation: riskBudget * pct,
-    reason,
   };
 }

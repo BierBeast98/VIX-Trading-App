@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import useSWR, { mutate as globalMutate } from "swr";
+import { useState } from "react";
+import useSWR from "swr";
 import dynamic from "next/dynamic";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatPct, formatNumber } from "@/lib/utils";
-import { runBacktest, suggestPositionSize } from "@/lib/analytics";
+import { runBacktest, type PerformanceMetrics } from "@/lib/analytics";
 
 // Recharts (~200 KB) aus dem Seiten-Bundle halten — Charts laden nach der Hydration nach
 const EntryBucketChart = dynamic(
@@ -19,28 +19,18 @@ const BacktestTradeChart = dynamic(
   { ssr: false, loading: () => <div style={{ height: 280 }} /> }
 );
 
-interface Metrics {
-  totalTrades: number;
-  closedTrades: number;
-  winCount: number;
-  lossCount: number;
-  winRate: number;
-  avgReturn: number;
-  avgWin: number;
-  avgLoss: number;
-  avgHoldDays: number;
-  sharpeRatio: number;
-  bestTrade: number;
-  worstTrade: number;
-  totalReturn: number;
-  compoundReturn: number;
-  annualizedReturn: number;
-  periodDays: number;
-  firstTradeDate: string | null;
-  lastTradeDate: string | null;
-  totalPnlEur: number;
-  tradesWithEurData: number;
-  alertTriggeredCount: number;
+type Metrics = PerformanceMetrics;
+interface CapitalData {
+  currentCapital: number | null;
+  startingCapital: number | null;
+  availableCapital: number | null;
+  investedCapital: number;
+  allocationCapital: number | null;
+  asOf: string | null;
+  source: string | null;
+  realizedPnlEur: number | null;
+  returnPct: number | null;
+  annualizedReturnPct: number | null;
 }
 
 interface EntryBucket {
@@ -53,143 +43,77 @@ interface EntryBucket {
 interface AnalyticsData {
   metrics: Metrics;
   entryAnalysis: EntryBucket[];
-  riskBudget: number;
-}
-
-interface Settings {
-  vixLowThreshold: number;
-  targetReturnPct: number;
-  trailingStopConfig?: { stepPct?: number };
 }
 
 export default function AnalyticsPage() {
-  const { data, isLoading: loading } = useSWR<AnalyticsData>("/api/analytics");
-  const { data: settings } = useSWR<Settings>("/api/settings");
-  const { data: capitalData } = useSWR<{ currentCapital: number | null }>("/api/account-capital");
-
-  // Aktuell verfügbares Kapital (inkl. realisierter G/V) — Eingabe, persistiert in VixCache
-  const [capitalInput, setCapitalInput] = useState("");
-  const [capitalSaved, setCapitalSaved] = useState(false);
-  useEffect(() => {
-    if (capitalData?.currentCapital != null) setCapitalInput(String(capitalData.currentCapital));
-  }, [capitalData?.currentCapital]);
-
-  const saveCapital = async () => {
-    const val = parseFloat(capitalInput);
-    if (!isFinite(val) || val < 0) return;
-    await fetch("/api/account-capital", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentCapital: val }),
-    });
-    globalMutate("/api/account-capital");
-    setCapitalSaved(true);
-    setTimeout(() => setCapitalSaved(false), 1500);
-  };
+  const { data, isLoading: loading, error: analyticsError } = useSWR<AnalyticsData>("/api/analytics");
+  const { data: capitalData, error: capitalError } = useSWR<CapitalData>("/api/account-capital");
 
   // Backtesting state
-  const [btDirection, setBtDirection] = useState<"long" | "short">("short");
-  const [btThreshold, setBtThreshold] = useState("25");
+  const [btDirection, setBtDirection] = useState<"long" | "short">("long");
+  const [btThreshold, setBtThreshold] = useState("15");
   const [btTargetReturn, setBtTargetReturn] = useState("18");
   const [btStepPct, setBtStepPct] = useState("5");
-  const [btLeverage, setBtLeverage] = useState("10");
+  const [btLeverage, setBtLeverage] = useState("2");
   const [btMaxHold, setBtMaxHold] = useState("60");
   const [btStopLoss, setBtStopLoss] = useState("0");
   const [btKnockout, setBtKnockout] = useState("0");
   const [btResult, setBtResult] = useState<ReturnType<typeof runBacktest> | null>(null);
   const [btRunning, setBtRunning] = useState(false);
+  const [btError, setBtError] = useState<string | null>(null);
   const [btHistory, setBtHistory] = useState<{ date: string; close: number }[]>([]);
-
-  // Position sizing state
-  const [psVix, setPsVix] = useState("15");
-  const [psBudget, setPsBudget] = useState("");
-  const [psResult, setPsResult] = useState<ReturnType<typeof suggestPositionSize> | null>(null);
-
-  // Pre-fill backtest params from saved settings
-  useEffect(() => {
-    if (settings) {
-      setBtTargetReturn(String(settings.targetReturnPct ?? 18));
-      setBtStepPct(String(settings.trailingStopConfig?.stepPct ?? 5));
-    }
-  }, [settings]);
 
   const runBt = async () => {
     setBtRunning(true);
-    const res = await fetch(`/api/vix/historical?period=1y`);
-    if (res.ok) {
+    setBtError(null);
+    try {
+      const res = await fetch(`/api/vix/historical?period=1y`);
+      if (!res.ok) throw new Error("Historische Kurse konnten nicht geladen werden.");
       const histData = await res.json();
       const spotHistory = histData.vix ?? [];
-      const futuresHistory = histData.vix3m ?? [];
       setBtHistory(spotHistory);
-      const result = runBacktest(spotHistory, {
+      setBtResult(runBacktest(spotHistory, {
         direction: btDirection,
         entryThreshold: parseFloat(btThreshold),
         targetReturnPct: parseFloat(btTargetReturn),
         stepPct: parseFloat(btStepPct),
         leverageRatio: parseFloat(btLeverage),
-        maxHoldDays: parseInt(btMaxHold),
-        stopLossPct: parseFloat(btStopLoss) || 0,
-        knockoutBarrierPct: parseFloat(btKnockout) || 0,
-      }, futuresHistory.length > 0 ? futuresHistory : undefined);
-      setBtResult(result);
+        maxHoldDays: parseInt(btMaxHold, 10),
+        stopLossPct: parseFloat(btStopLoss),
+        knockoutBarrierPct: parseFloat(btKnockout),
+      }));
+    } catch {
+      setBtResult(null);
+      setBtError("Historische Kurse konnten nicht geladen werden. Bitte erneut versuchen.");
+    } finally {
+      setBtRunning(false);
     }
-    setBtRunning(false);
   };
-
-  const calcPositionSize = () => {
-    const budget = parseFloat(psBudget) || data?.riskBudget || 10000;
-    const result = suggestPositionSize(budget, parseFloat(psVix), 18);
-    setPsResult(result);
-  };
-
-  useEffect(() => {
-    if (data) setPsBudget(String(data.riskBudget));
-  }, [data]);
 
   const m = data?.metrics;
 
-  // Annualisierung erst ab genug Historie aussagekräftig
-  const annualizedReliable = !!m && m.closedTrades >= 2 && m.periodDays >= 14;
   const fmtDate = (iso: string | null) =>
     iso ? new Date(iso).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
-  const monthsLabel = m && m.periodDays > 0 ? (m.periodDays / 30.44).toFixed(1) : "0";
-
-  // €-gewichtete Depot-Rendite: aus aktuellem Kapital zum Startkapital zurückrechnen.
-  // Startkapital = aktuelles Kapital − realisierter G/V. Rendite = G/V / Startkapital.
-  const currentCapital = parseFloat(capitalInput);
-  const pnlEur = m?.totalPnlEur ?? 0;
-  const startCapital = isFinite(currentCapital) ? currentCapital - pnlEur : NaN;
-  const capitalValid = !!m && isFinite(currentCapital) && currentCapital > 0 && startCapital > 0;
-  const euroReturnPct = capitalValid ? (pnlEur / startCapital) * 100 : null;
-  const euroAnnualizedPct =
-    capitalValid && m!.periodDays >= 14
-      ? (Math.pow(currentCapital / startCapital, 365.25 / m!.periodDays) - 1) * 100
-      : null;
-  const fmtEur = (n: number) =>
-    `${n >= 0 ? "+" : "−"}${Math.abs(n).toLocaleString("de-DE", { maximumFractionDigits: 0 })} €`;
-  const fmtEurPlain = (n: number) =>
-    n.toLocaleString("de-DE", { maximumFractionDigits: 0 }) + " €";
-
-  // KPI-„Gesamt": €-gewichtet wenn Kapital gesetzt, sonst gleichgewichtet (kumuliert)
-  const totalKpi = euroReturnPct != null
-    ? { label: "Gesamt (€-gew.)", value: formatPct(euroReturnPct), color: euroReturnPct >= 0 ? "#22C55E" : "#FF4D4D" }
-    : { label: "Gesamt (kumuliert)", value: m ? formatPct(m.compoundReturn) : "—", color: (m?.compoundReturn ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" };
+  const fmtEur = (n: number) => n.toLocaleString("de-DE", { style: "currency", currency: "EUR" });
+  const totalKpi = { label: "Realisierter G/V (brutto)", value: m && m.tradesWithEurData > 0 ? fmtEur(m.totalPnlEur) : "—", color: (m?.totalPnlEur ?? 0) >= 0 ? "#22C55E" : "#FF4D4D" };
 
   const kpis = m ? [
-    { label: "Win Rate", value: formatPct(m.winRate * 100, 0), color: m.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" },
-    { label: "Ø Rendite", value: formatPct(m.avgReturn), color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" },
-    { label: "Ø Haltetage", value: `${m.avgHoldDays.toFixed(1)}d`, color: "#8B8FA8" },
-    { label: "Sharpe Ratio", value: formatNumber(m.sharpeRatio, 2), color: m.sharpeRatio >= 1 ? "#22C55E" : "#F59E0B" },
-    { label: "Bester Trade", value: formatPct(m.bestTrade), color: "#22C55E" },
-    { label: "Schlechtester Trade", value: formatPct(m.worstTrade), color: "#FF4D4D" },
+    { label: "Win Rate", value: m.analyzedTrades ? formatPct(m.winRate * 100, 0) : "—", color: m.winRate >= 0.5 ? "#22C55E" : "#FF4D4D" },
+    { label: "Ø Rendite", value: m.analyzedTrades ? formatPct(m.avgReturn) : "—", color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" },
+    { label: "Ø Haltetage", value: m.closedTrades > m.invalidDateTrades ? `${m.avgHoldDays.toFixed(1)}d` : "—", color: "#8B8FA8" },
+    { label: "Rendite / Streuung je Trade", value: m.analyzedTrades >= 2 ? formatNumber(m.sharpeRatio, 2) : "—", color: m.sharpeRatio >= 1 ? "#22C55E" : "#F59E0B" },
+    { label: "Bester Trade", value: m.analyzedTrades ? formatPct(m.bestTrade) : "—", color: "#22C55E" },
+    { label: "Schlechtester Trade", value: m.analyzedTrades ? formatPct(m.worstTrade) : "—", color: "#FF4D4D" },
     totalKpi,
-    { label: "Alert-getriggert", value: `${m.alertTriggeredCount}/${m.closedTrades}`, color: "#B8E15A" },
+    { label: "Alert-getriggert", value: `${m.alertTriggeredCount}/${m.analyzedTrades}`, color: "#B8E15A" },
   ] : [];
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
       <h1 className="text-2xl font-bold text-white">Analytics</h1>
 
+      {analyticsError && <p className="text-sm text-[#F59E0B]">Trade-Kennzahlen konnten nicht geladen werden. Bitte erneut laden; angezeigte ältere Werte können veraltet sein.</p>}
+      {capitalError && <p className="text-sm text-[#F59E0B]">Strategiekapital konnte nicht geladen werden.</p>}
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
@@ -206,94 +130,24 @@ export default function AnalyticsPage() {
             ))}
           </div>
 
-          {/* Rendite über die Zeit (€-gewichtet) */}
+          <Card>
+            <CardHeader><CardTitle className="text-sm font-semibold text-white">Strategiekapital</CardTitle></CardHeader>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div><div className="text-xs text-[#8B8FA8]">Startkapital</div><div className="text-xl text-white">{capitalData?.startingCapital != null ? fmtEur(capitalData.startingCapital) : "—"}</div></div>
+              <div><div className="text-xs text-[#8B8FA8]">Kapital (Buchwert)</div><div className="text-xl text-white">{capitalData?.currentCapital != null ? fmtEur(capitalData.currentCapital) : "—"}</div></div>
+              <div><div className="text-xs text-[#8B8FA8]">Davon verfügbar</div><div className="text-xl text-white">{capitalData?.availableCapital != null ? fmtEur(capitalData.availableCapital) : "—"}</div></div>
+              <div><div className="text-xs text-[#8B8FA8]">Realisierte Rendite</div><div className="text-xl text-white">{capitalData?.returnPct != null ? formatPct(capitalData.returnPct) : "—"}</div></div>
+            </div>
+            <p className="mt-3 text-xs text-[#8B8FA8]">{capitalData?.asOf ? `Basis ab ${fmtDate(capitalData.asOf)}. ` : "Noch keine datierte Kapitalbasis. "}Bestätigte manuelle Ausführungen einschließlich Gebühren; offene Bestände zum Einstand. Historische Trades fließen nicht in diese Kapitalbasis ein.</p>
+          </Card>
           {m && m.closedTrades > 0 && (
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold text-white">Rendite über die Zeit</CardTitle>
-                <span className="text-xs" style={{ color: "#8B8FA8" }}>
-                  {fmtDate(m.firstTradeDate)} – {fmtDate(m.lastTradeDate)} · {monthsLabel} Mon. · {m.closedTrades} Trades
-                </span>
-              </CardHeader>
-
-              {/* Kapital-Eingabe + abgeleitetes Startkapital */}
-              <div className="flex flex-wrap items-end gap-4 mb-4 p-3 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                <div className="w-40">
-                  <Input
-                    label="Aktuelles Kapital (€)"
-                    type="number"
-                    step="50"
-                    value={capitalInput}
-                    onChange={(e) => setCapitalInput(e.target.value)}
-                    onBlur={saveCapital}
-                  />
-                </div>
-                <div className="text-xs leading-relaxed" style={{ color: "#8B8FA8" }}>
-                  inkl. realisierter G/V der letzten Trades<br />
-                  {capitalValid ? (
-                    <>
-                      Startkapital: <span className="text-white font-medium">{fmtEurPlain(startCapital)}</span>
-                      {" → "}aktuell <span className="text-white font-medium">{fmtEurPlain(currentCapital)}</span>
-                      {" "}({fmtEur(pnlEur)})
-                    </>
-                  ) : (
-                    <span style={{ color: "#4A4A5A" }}>Kapital eingeben, um die €-gewichtete Rendite zu berechnen</span>
-                  )}
-                </div>
-                {capitalSaved && <span className="text-xs" style={{ color: "#22C55E" }}>✓ gespeichert</span>}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                {/* Gesamtrendite €-gewichtet (primär) */}
-                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Gesamtrendite (€-gewichtet)</div>
-                  <div className="text-3xl font-bold" style={{ color: euroReturnPct == null ? "#8B8FA8" : euroReturnPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                    {euroReturnPct == null ? "—" : formatPct(euroReturnPct)}
-                  </div>
-                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
-                    realisierter G/V {fmtEur(pnlEur)}
-                  </div>
-                </div>
-
-                {/* Annualisiert €-gewichtet */}
-                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Annualisiert (aufs Jahr)</div>
-                  <div className="text-3xl font-bold" style={{ color: euroAnnualizedPct == null ? "#8B8FA8" : euroAnnualizedPct >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                    {euroAnnualizedPct == null ? "—" : formatPct(euroAnnualizedPct)}
-                  </div>
-                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
-                    {euroAnnualizedPct != null
-                      ? `hochgerechnet aus ${monthsLabel} Mon.`
-                      : capitalValid ? "zu wenig Historie (≥14 Tage)" : "Kapital eingeben"}
-                  </div>
-                </div>
-
-                {/* Ø pro Trade */}
-                <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                  <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Rendite / Trade</div>
-                  <div className="text-3xl font-bold" style={{ color: m.avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                    {formatPct(m.avgReturn)}
-                  </div>
-                  <div className="text-xs mt-1" style={{ color: "#4A4A5A" }}>
-                    Ø Haltedauer {m.avgHoldDays.toFixed(0)}d
-                  </div>
-                </div>
-              </div>
-
-              {/* Gleichgewichtete Referenz (prozentual, ohne Positionsgrößen) */}
-              <div className="mt-3 pt-3 text-xs" style={{ borderTop: "1px solid #1E1E28", color: "#4A4A5A" }}>
-                Gleichgewichtet (% je Trade, ohne €-Größen): kumuliert{" "}
-                <span style={{ color: m.compoundReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>{formatPct(m.compoundReturn)}</span>
-                {" "}· annualisiert{" "}
-                <span style={{ color: !annualizedReliable ? "#8B8FA8" : m.annualizedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                  {annualizedReliable ? formatPct(m.annualizedReturn) : "—"}
-                </span>
-                {m.tradesWithEurData < m.closedTrades && (
-                  <span style={{ color: "#F59E0B" }}>
-                    {" "}· ⚠ {m.closedTrades - m.tradesWithEurData} Trade(s) ohne €-Daten ignoriert
-                  </span>
-                )}
-              </div>
+              <CardHeader><CardTitle className="text-sm font-semibold text-white">Historische Trades</CardTitle></CardHeader>
+              <p className="text-sm text-[#8B8FA8]">{m.closedTrades} geschlossen · {m.analyzedTrades} mit auswertbarer Rendite · {fmtDate(m.firstTradeDate)} – {fmtDate(m.lastTradeDate)}</p>
+              <p className="mt-2 text-xs text-[#8B8FA8]">Realisierter G/V: {m.tradesWithEurData ? fmtEur(m.totalPnlEur) : "—"} aus {m.tradesWithEurData} Trades mit Kursen und Stückzahl, vor Gebühren. Einzelrenditen beschreiben das Zertifikat. Ohne historische Kapitalbasis und Zahlungsströme ist keine Depot- oder Jahresrendite ableitbar.</p>
+              {m.invalidDateTrades > 0 && <p className="mt-2 text-xs text-[#F59E0B]">{m.invalidDateTrades} Trade(s) mit ungültiger Datumsfolge von Kennzahlen ausgeschlossen. Originaldaten bleiben in der Trade-Historie sichtbar.</p>}
+              {m.missingReturnTrades > 0 && <p className="mt-2 text-xs text-[#F59E0B]">{m.missingReturnTrades} Trade(s) ohne berechenbare Rendite von Renditekennzahlen ausgeschlossen.</p>}
+              {m.tradesWithEurData < m.closedTrades - m.invalidDateTrades && <p className="mt-2 text-xs text-[#F59E0B]">{m.closedTrades - m.invalidDateTrades - m.tradesWithEurData} Trade(s) ohne vollständige Euro-Daten.</p>}
             </Card>
           )}
 
@@ -315,12 +169,12 @@ export default function AnalyticsPage() {
             {/* Backtesting */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm font-semibold text-white">Backtesting (1 Jahr)</CardTitle>
+                <CardTitle className="text-sm font-semibold text-white">Historisches Spot-Modell (1 Jahr)</CardTitle>
               </CardHeader>
               <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
                 {btDirection === "short"
-                  ? `Einstieg wenn VIX ≥ Einstiegsniveau (Short). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.`
-                  : `Einstieg wenn VIX ≤ Einstiegsniveau (Long). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Renditen hebeladjustiert.`}
+                  ? `Einstieg wenn VIX ≥ Einstiegsniveau (Short). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Vereinfachtes VIX-Spot-Modell mit konstantem Hebel; keine Simulation der Signalstrategie, echter VX-Kontrakte, Zertifikate, Gebühren oder Intraday-Knock-outs.`
+                  : `Einstieg wenn VIX ≤ Einstiegsniveau (Long). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Vereinfachtes VIX-Spot-Modell mit konstantem Hebel; keine Simulation der Signalstrategie, echter VX-Kontrakte, Zertifikate, Gebühren oder Intraday-Knock-outs.`}
               </p>
               <div className="space-y-3">
                 {/* Direction Toggle */}
@@ -398,6 +252,7 @@ export default function AnalyticsPage() {
                   Backtest starten
                 </Button>
 
+                {btError && <p className="text-xs text-[#F59E0B]">{btError}</p>}
                 {btResult && (
                   <div className="rounded-xl p-4 space-y-3 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
                     <div className="text-xs font-medium" style={{ color: "#B8E15A" }}>
@@ -424,7 +279,7 @@ export default function AnalyticsPage() {
                         </span>
                       </div>
                       <div>
-                        <span style={{ color: "#8B8FA8" }}>Gesamtrendite: </span>
+                        <span style={{ color: "#8B8FA8" }}>Modellrendite (Vollanlage): </span>
                         <span style={{ color: btResult.totalReturn >= 0 ? "#22C55E" : "#FF4D4D" }} className="font-medium">
                           {btResult.totalReturn >= 0 ? "+" : ""}{btResult.totalReturn.toFixed(1)}%
                         </span>
@@ -501,60 +356,12 @@ export default function AnalyticsPage() {
               </div>
             </Card>
 
-            {/* Position Sizing */}
             <Card>
-              <CardHeader>
-                <CardTitle className="text-sm font-semibold text-white">Positionsgrößen-Rechner</CardTitle>
-              </CardHeader>
-              <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
-                Empfohlene Positionsgröße basierend auf VIX-Level und Risikobudget
-              </p>
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input
-                    label="Aktueller VIX"
-                    type="number"
-                    step="0.5"
-                    value={psVix}
-                    onChange={(e) => setPsVix(e.target.value)}
-                  />
-                  <Input
-                    label="Risikobudget (€)"
-                    type="number"
-                    value={psBudget}
-                    onChange={(e) => setPsBudget(e.target.value)}
-                  />
-                </div>
-                <Button variant="primary" size="sm" onClick={calcPositionSize}>
-                  Berechnen
-                </Button>
-
-                {psResult && (
-                  <div className="rounded-xl p-4 mt-3" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-                    <div className="text-3xl font-bold mb-2" style={{ color: "#B8E15A" }}>
-                      €{psResult.allocation.toLocaleString("de-DE", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </div>
-                    <p className="text-sm" style={{ color: "#8B8FA8" }}>{psResult.reason}</p>
-                  </div>
-                )}
-
-                {/* VIX allocation guide — Long-Spike-Strategie: mehr Budget bei niedrigem VIX */}
-                <div className="mt-4 space-y-1.5">
-                  {[
-                    { range: "≤ 14", pct: "70%", color: "#22C55E" },
-                    { range: "14–16", pct: "60%", color: "#B8E15A" },
-                    { range: "16–20", pct: "40%", color: "#F59E0B" },
-                    { range: "20–25", pct: "25%", color: "#F97316" },
-                    { range: "25–30", pct: "15%", color: "#EF4444" },
-                    { range: "> 30", pct: "5%", color: "#DC2626" },
-                  ].map((row) => (
-                    <div key={row.range} className="flex justify-between text-xs">
-                      <span style={{ color: "#8B8FA8" }}>VIX {row.range}</span>
-                      <span style={{ color: row.color }} className="font-medium">{row.pct}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <CardHeader><CardTitle className="text-sm font-semibold text-white">Bestätigte Kaufkaskade</CardTitle></CardHeader>
+              <p className="text-sm text-[#8B8FA8]">Die manuelle Strategie verwendet insgesamt 30 %, 40 % und 50 % der Kapitalbasis der aktuellen oder nächsten Runde einschließlich Gebühren. Weitere Käufe ergänzen nur die Differenz.</p>
+              <div className="mt-4 space-y-2 text-white">{[30, 40, 50].map(pct => <div key={pct}>{pct} % kumuliert: {capitalData?.allocationCapital != null ? fmtEur(capitalData.allocationCapital * pct / 100) : "—"}</div>)}</div>
+              <p className="mt-3 text-xs text-[#8B8FA8]">Verbindliche Signale und tatsächliche Ausführungen im Signalbereich prüfen.</p>
+              <a href="/signals" className="inline-block mt-3 text-sm text-[#B8E15A]">Zu den Handelssignalen →</a>
             </Card>
           </div>
 
@@ -568,8 +375,8 @@ export default function AnalyticsPage() {
                 <div className="p-4 rounded-xl" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
                   <div className="text-xs mb-2" style={{ color: "#8B8FA8" }}>Alert-Nutzung</div>
                   <div className="text-xl font-bold" style={{ color: "#B8E15A" }}>
-                    {m.closedTrades > 0
-                      ? `${((m.alertTriggeredCount / m.closedTrades) * 100).toFixed(0)}%`
+                    {m.analyzedTrades > 0
+                      ? `${((m.alertTriggeredCount / m.analyzedTrades) * 100).toFixed(0)}%`
                       : "—"
                     }
                   </div>
