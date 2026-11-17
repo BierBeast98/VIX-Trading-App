@@ -339,3 +339,12 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Geschützte Telegram-Verknüpfungsroute und Operator-Helfer ergänzt. Bestätigte Chat-ID kann ohne weitere manuelle Servervariable im vorhandenen VixCache gespeichert werden. Der Nutzer muss dafür nach Bereitstellung einen einmaligen persönlichen Startlink öffnen. Verbindung/Testnachricht noch nicht abgeschlossen.
 
 - Bereitstellung autorisiert. Vollständiges Archiv behebt fehlende package.json; Hostinger-Turbopack/PostCSS-Worker bricht intern ab. Produktionsbuild deshalb auf `next build --webpack` umgestellt; Neon/Prisma/ws als externe Serverpakete erhalten. Lokaler Webpack-Produktionsbuild bestanden.
+
+### Live-Ergebnis 17.11.2026
+
+- Produktionsstand `5e93ee0` erfolgreich aus GitHub `main` auf `vix-trading.de` bereitgestellt. Hostinger-Build `01a1e9ae-cd3e-7134-b55c-19ee2a391e28` abgeschlossen (Webpack).
+- `/signals` live, geschützter API-Endpunkt antwortet korrekt mit 401 ohne Berechtigung. Bestehende Trades über Live-API gegen DB-Anzahl verifiziert; Neon-Anbindung funktioniert auch nach Build-Umstellung.
+- `Vix98_Trading_Bot` per persönlichem Startcode verknüpft. Server antwortete `connected: true`; Telegram-Testnachricht erfolgreich an den zugeordneten privaten Chat gesendet. Chat-ID liegt ausschließlich im vorhandenen `VixCache.telegram_connection_v1`, Token bleibt bei Hostinger.
+- Temporäre Administrationsfreigabe und lokale Geheimnisdatei nach Erfolg entfernt.
+- Handelsüberwachung ausdrücklich in Produktion pausiert (`manual_strategy_v1.config.enabled = false`), abschließend verifiziert. Keine Orders ausgeführt.
+- Offen vor Nutzung des geschützten Signalbereichs: `SIGNALS_ACCESS_KEY` auf Hostinger einrichten. Offen vor Aktivierung: deutscher Broker/Handelsplatz, Handelsfenster/Feiertage, aktives Produkt und tatsächlich frische Geld-/Briefkurse.
