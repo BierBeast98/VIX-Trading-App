@@ -17,4 +17,4 @@ Widersprüchliche Datumsfolgen werden angezeigt und aus Kennzahlen ausgeschlosse
 
 Die Bereinigung am 17.11.2026 hat fünf geschlossene Positionsanzeigen anhand ihrer jeweils einzigen verknüpften abgeschlossenen Trade-Buchung synchronisiert. Originalwerte und vorheriges Budget sind unter `VixCache.capital_reconciliation_20261117` protokolliert; keine Trades wurden gelöscht. Geschlossene Positionen ohne eindeutigen zugehörigen Ausführungsbeleg bleiben unverändert.
 
-Die Oberfläche verweist für tatsächliche Ausführungen auf die Erfassung; ein Kurs-Cache gilt nicht als Verkaufsbeleg. Die alte Alert-Seite leitet zu `/signals` weiter. Die Handelsüberwachung bleibt pausiert.
+Die Oberfläche verweist für tatsächliche Ausführungen auf die Erfassung; ein Kurs-Cache gilt nicht als Verkaufsbeleg. Die alte Alert-Seite leitet zu `/signals` weiter. Die Handelsüberwachung wurde am17.11.2026 auf Nutzerwunsch gestartet. Neue Käufe für BD11R4 bleiben durch die bestehende30-Tage-VX-Regel gesperrt.

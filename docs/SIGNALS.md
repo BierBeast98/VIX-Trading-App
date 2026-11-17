@@ -92,9 +92,9 @@ Die Route `/api/telegram/connect` akzeptiert nur die zeitlich begrenzte Administ
 
 ## Bestätigte Nutzereinstellungen am 17.11.2026
 
-Strategiekapital 1.500 EUR, Variante C, geplanter Einstiegshebel ca. 2,0. Kumulierte Zielquoten 30/40/50 % entsprechen 450/600/750 EUR; zusätzliche Käufe zunächst jeweils 150 EUR abzüglich bereits entstandener Kostenabweichungen. Rundenverlustsignal 90 EUR. Broker comdirect, vorbereitetes Produkt-Handelsfenster Stuttgart 08:00–22:00 Europe/Berlin; 2026-Feiertage nach Börse Stuttgart, Jahreswechsel/Sonderzeiten vor Aktivierung ergänzen. System bleibt pausiert.
+Strategiekapital 1.500 EUR, Variante C, geplanter Einstiegshebel ca. 2,0. Kumulierte Zielquoten 30/40/50 % entsprechen 450/600/750 EUR; zusätzliche Käufe zunächst jeweils 150 EUR abzüglich bereits entstandener Kostenabweichungen. Rundenverlustsignal 90 EUR. Broker comdirect, vorbereitetes Produkt-Handelsfenster Stuttgart 08:00–22:00 Europe/Berlin; 2026-Feiertage nach Börse Stuttgart, Jahreswechsel/Sonderzeiten vor Aktivierung ergänzen. Überwachung am17.11.2026 auf ausdrücklichen Nutzerwunsch gestartet; aktuelle Einstiege für BD11R4 durch die unveränderte30-Tage-VX-Regel gesperrt.
 
-BD11R4 / DE000BD11R44 ist ein Produktbeispiel, keine bestätigte Order und noch keine freigegebene Auswahl. Die aktuellen Vontobel-Metadaten nennen UXZ6 (Dezember 2026), während die Börsenseite noch November im Titel führt. Mit Dezember-Verfall 16.12.2026 liegt die Restlaufzeit am 17.11. bei 29 Kalendertagen. Daher heute nach der bestätigten 30-Tage-Regel kein neuer Einstieg in dieses Produkt.
+BD11R4 / DE000BD11R44 ist seit17.11.2026 als geprüftes Vontobel-Überwachungsprodukt hinterlegt; dies ist keine bestätigte Order. Die aktuellen Vontobel-Metadaten nennen UXZ6 (Dezember 2026), während die Börsenseite noch November im Titel führt. Mit Dezember-Verfall 16.12.2026 liegt die Restlaufzeit am 17.11. bei 29 Kalendertagen. Daher heute nach der bestätigten 30-Tage-Regel kein neuer Einstieg in dieses Produkt.
 
 Der Adapter wertet die aktuellen Vontobel-Preis-Snapshots mit deren `latestTimestamp` aus. Getrennte bidTimestamp/askTimestamp haben Vorrang, wenn vorhanden. Produktchart-Kurse sind nur datierte Rückfälle; ein Briefkurs wird niemals aus Geldkurs/Spread geschätzt. Long-Richtung, EUR und identischer aktueller Basisvertrag müssen passen.
 
@@ -109,3 +109,5 @@ Serverseitig gilt das Brokerfenster08–22 Europe/Berlin mit Wochenenden und hin
 Geprüftes Beispielprodukt BD11R4/DE000BD11R44 wird mit dem aktuellen VX-Vertrag UXZ6 (Dezember2026), Verfall16.12.2026 und Barriere12,10USD überwacht. Die unbegrenzte Laufzeit des Zertifikats ist bestätigt; laut endgültigen Bedingungen rollt der Emittent in spätere Futures und passt Basispreis/Barriere an. Die App übernimmt einen Roll nicht ungeprüft und weicht die30-Tage-VX-Regel nicht auf: bei Start am17.11. sind neue Käufe deswegen gesperrt. Ein aktiver Prüftakt ist keine Freigabe einer regelwidrigen Order.
 
 Quellen: [Vontobel](https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/DE000BD11R44), [endgültige Bedingungen](https://derinet.vontobel.ch/finalterms/DE000BD11R44d.pdf), [Cboe-Verfallkalender](https://www.cboe.com/markets/us/futures/market-statistics/settlement/futures/daily).
+
+Produktionsstart bestätigt: Hostinger-Cron `R7triIvgun`, `1-59/5 * * * *`. Erster automatischer Durchlauf17.11.2026 um17:16:01 Berlin: checkedtrue, Ergebnis VX-Restlaufzeit unter30 Tagen,0Signale/0Ausführungen. Letzte Abruf-/Ergebniszeiten unter signal_monitor_cron_v1.

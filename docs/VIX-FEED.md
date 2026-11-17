@@ -1,6 +1,6 @@
 # VIX-Datenfeed
 
-Stand: 17.11.2026. **Der Nutzer akzeptiert ausdrücklich Yahoo-VIX mit 15–20 Minuten Verzögerung für Einstiege. Kein kostenpflichtiger Zugang erforderlich. Ausstiegssignale benötigen weiterhin frische Vontobel-Geldkurse; Handelsüberwachung bleibt bis zur Produkt-/Rollklärung pausiert.**
+Stand: 17.11.2026. **Der Nutzer akzeptiert ausdrücklich Yahoo-VIX mit 15–20 Minuten Verzögerung für Einstiege. Kein kostenpflichtiger Zugang erforderlich. Ausstiegssignale benötigen weiterhin frische Vontobel-Geldkurse; Handelsüberwachung wurde am17.11.2026 ausdrücklich gestartet; neue Einstiege für BD11R4 bleiben durch die bestehende30-Tage-VX-Regel gesperrt.**
 
 ## Ursache und Quellenwahl
 
