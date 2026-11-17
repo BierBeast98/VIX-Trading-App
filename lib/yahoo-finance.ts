@@ -1,3 +1,4 @@
+import { trackedYahoo, trackedVontobel } from './archive/capture';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // yahoo-finance2 v3: must instantiate with new YahooFinance()
 import YahooFinance from "yahoo-finance2";
@@ -28,7 +29,7 @@ export interface HistoricalPoint {
 
 async function fetchQuote(symbol: string): Promise<VixQuote | null> {
   try {
-    const result = await (yahooFinance as any).quote(symbol) as any;
+    const result = await trackedYahoo(symbol, 'quote', () => (yahooFinance as any).quote(symbol)) as any;
     return {
       symbol,
       price: result.regularMarketPrice ?? 0,
@@ -69,11 +70,11 @@ export async function getVixHistory(days = 90): Promise<HistoricalPoint[]> {
     const period1 = new Date();
     period1.setDate(period1.getDate() - days);
 
-    const results = await (yahooFinance as any).historical("^VIX", {
+    const results = await trackedYahoo("^VIX", 'historical', () => (yahooFinance as any).historical("^VIX", {
       period1: period1.toISOString().split("T")[0],
       period2: new Date().toISOString().split("T")[0],
       interval: "1d",
-    }) as any[];
+    })) as any[];
 
     return results.map((r: any) => ({
       date: new Date(r.date).toISOString().split("T")[0],
@@ -95,11 +96,11 @@ export async function getVix3MHistory(days = 90): Promise<HistoricalPoint[]> {
     const period1 = new Date();
     period1.setDate(period1.getDate() - days);
 
-    const results = await (yahooFinance as any).historical("^VIX3M", {
+    const results = await trackedYahoo("^VIX3M", 'historical', () => (yahooFinance as any).historical("^VIX3M", {
       period1: period1.toISOString().split("T")[0],
       period2: new Date().toISOString().split("T")[0],
       interval: "1d",
-    }) as any[];
+    })) as any[];
 
     return results.map((r: any) => ({
       date: new Date(r.date).toISOString().split("T")[0],
@@ -120,11 +121,11 @@ export async function getSP500History(days = 90): Promise<HistoricalPoint[]> {
     const period1 = new Date();
     period1.setDate(period1.getDate() - days);
 
-    const results = await (yahooFinance as any).historical("^GSPC", {
+    const results = await trackedYahoo("^GSPC", 'historical', () => (yahooFinance as any).historical("^GSPC", {
       period1: period1.toISOString().split("T")[0],
       period2: new Date().toISOString().split("T")[0],
       interval: "1d",
-    }) as any[];
+    })) as any[];
 
     return results.map((r: any) => ({
       date: new Date(r.date).toISOString().split("T")[0],
@@ -143,10 +144,10 @@ export async function getSP500History(days = 90): Promise<HistoricalPoint[]> {
 /** VIX 3-Month intraday (^VIX3M) at 5-min intervals — fallback for front-month futures */
 export async function getVix3MIntraday(): Promise<HistoricalPoint[]> {
   try {
-    const result = await (yahooFinance as any).chart("^VIX3M", {
+    const result = await trackedYahoo("^VIX3M", 'chart', () => (yahooFinance as any).chart("^VIX3M", {
       period1: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       interval: "5m",
-    }) as any;
+    })) as any;
 
     const quotes: any[] = result?.quotes ?? [];
 
@@ -181,7 +182,7 @@ export interface VontobelQuote {
 export async function getVontobelFuturesQuote(isin?: string): Promise<VontobelQuote | null> {
   const id = isin || DEFAULT_VONTOBEL_ISIN;
   try {
-    const res = await fetch(
+    const res = await trackedVontobel(
       `https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${id}`,
       {
         headers: {
@@ -235,7 +236,7 @@ export async function getVixFuturesIntraday(isin?: string): Promise<HistoricalPo
   try {
     // Vontobel API-Änderung 2026-07: nur noch EIN Range-Parameter (/detail/{range})
     const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0?c=de-de`;
-    const res = await fetch(url, {
+    const res = await trackedVontobel(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         Accept: "application/json",
@@ -274,7 +275,7 @@ export async function getVontobelCertificateIntraday(isin?: string): Promise<His
   const vontobelIsin = isin || DEFAULT_VONTOBEL_ISIN;
   try {
     const url = `https://markets.vontobel.com/api/v1/charts/products/${vontobelIsin}/detail/0?c=de-de`;
-    const res = await fetch(url, {
+    const res = await trackedVontobel(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         Accept: "application/json",
@@ -318,7 +319,7 @@ export async function getVontobelCertificatePrice(
   isin: string
 ): Promise<number | null> {
   try {
-    const resp = await fetch(
+    const resp = await trackedVontobel(
       `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
       {
         headers: {
@@ -348,10 +349,10 @@ export async function getVontobelCertificatePrice(
 
 export async function getVixIntraday(): Promise<HistoricalPoint[]> {
   try {
-    const result = await (yahooFinance as any).chart("^VIX", {
+    const result = await trackedYahoo("^VIX", 'chart', () => (yahooFinance as any).chart("^VIX", {
       period1: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       interval: "5m",
-    }) as any;
+    })) as any;
 
     const quotes: any[] = result?.quotes ?? [];
 

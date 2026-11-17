@@ -1,3 +1,4 @@
+import { trackedVontobel } from '@/lib/archive/capture';
 /**
  * GET /api/vontobel/batch?isins=ISIN1,ISIN2,...
  *
@@ -44,7 +45,7 @@ async function getPrice(isin: string): Promise<object> {
 
   // 3. Fresh fetch from Vontobel chart API
   try {
-    const resp = await fetch(
+    const resp = await trackedVontobel(
       `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
       { headers: FETCH_HEADERS, next: { revalidate: 0 } }
     );

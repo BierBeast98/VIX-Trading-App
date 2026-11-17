@@ -1,3 +1,4 @@
+import { withArchiveContext } from '@/lib/archive/capture';
 import { readState, changeState } from './store';
 import { evaluate, marketOpen } from './engine';
 import { loadQuote } from './market';
@@ -9,7 +10,7 @@ export async function runSignalsCheck() {
     await changeState(async state => { state.checkedAt = new Date().toISOString(); state.health = 'Handelsfenster geschlossen oder Brokerzeiten fehlen'; return { state, result: undefined }; });
     return { checked: false, managed: true, message: 'Außerhalb des eingerichteten Broker-Handelsfensters' };
   }
-  const quote = await loadQuote(before.round?.config ?? before.config);
+  const quote = await withArchiveContext({ origin: 'signals' }, () => loadQuote(before.round?.config ?? before.config));
   const result = await changeState(async (state, tx) => {
     // Reject drift through legacy/manual DB edits before calculating from stale inventory.
     if (state.round) {

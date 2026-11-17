@@ -1,3 +1,4 @@
+import { trackedVontobel } from '@/lib/archive/capture';
 import { NextRequest, NextResponse } from "next/server";
 import { memGet, memSet } from "@/lib/server-cache";
 
@@ -30,11 +31,11 @@ export async function GET(req: NextRequest) {
   try {
     // Fetch product page + chart data in parallel
     const [pageResp, chartResp] = await Promise.all([
-      fetch(
+      trackedVontobel(
         `https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${isin}`,
         { headers: HEADERS, next: { revalidate: 0 } }
       ),
-      fetch(
+      trackedVontobel(
         `https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,
         {
           headers: { ...HEADERS, Accept: "application/json, text/plain, */*" },

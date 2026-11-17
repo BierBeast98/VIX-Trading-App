@@ -57,3 +57,7 @@ Env Vars setzen unter: Hostinger → Einsätze → Einstellungen und erneute Ber
 ## Konkrete Handelssignale
 
 Der neue Bereich `/signals` berechnet die Long-Kaskade und Ausstiegssignale, benachrichtigt per Telegram plus E-Mail und verbucht tatsächliche Ausführungen nach Screenshot/Bestätigung. Standardmäßig pausiert. Einrichtung, Broker-Handelszeiten, Marktdatenanforderungen und Screenshot-Workflow: [docs/SIGNALS.md](docs/SIGNALS.md).
+
+## Langfristiges Datenarchiv
+
+`/archive` zeigt dauerhaft gespeicherte Kursdaten, Abrufmengen, Qualitätskennzeichen und CSV-Exporte. Der separate Collector läuft auch bei pausierter Handelsüberwachung. Einrichtung und genaue Messgrenzen: [docs/ARCHIVE.md](docs/ARCHIVE.md).

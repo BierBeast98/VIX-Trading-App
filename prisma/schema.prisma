@@ -125,3 +125,68 @@ model VixIntraday {
   @@unique([symbol, timestamp])
   @@index([symbol, timestamp])
 }
+
+// Append-only observations; exact duplicates are deduplicated by a content key.
+model MarketObservation {
+  id           BigInt   @id @default(autoincrement())
+  key          String   @unique
+  fetchId      String
+  source       String
+  instrument   String
+  kind         String
+  currency     String?
+  isin         String?
+  contract     String?
+  sourceAt     DateTime?
+  receivedAt   DateTime @default(now())
+  quality      String
+  last         Float?
+  bid          Float?
+  ask          Float?
+  open         Float?
+  high         Float?
+  low          Float?
+  close        Float?
+  volume       Float?
+  metadata     Json
+
+  @@index([instrument, sourceAt])
+  @@index([receivedAt])
+  @@index([fetchId])
+}
+
+model MarketFetch {
+  id             String   @id
+  runId          String?
+  source         String
+  operation      String
+  instrument     String
+  origin         String
+  measurement    String
+  startedAt      DateTime
+  finishedAt     DateTime
+  durationMs     Int
+  success        Boolean
+  httpStatus     Int?
+  responseBytes  Int?
+  returnedPoints Int
+  insertedPoints Int
+  errorCode      String?
+
+  @@index([startedAt])
+  @@index([source, startedAt])
+  @@index([runId])
+}
+
+model MarketCollectionRun {
+  id          String   @id
+  slot        String   @unique
+  startedAt   DateTime
+  finishedAt  DateTime?
+  leaseUntil  DateTime
+  status      String
+  attempts    Int      @default(1)
+  errorCode   String?
+
+  @@index([startedAt])
+}

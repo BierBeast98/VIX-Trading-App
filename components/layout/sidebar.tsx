@@ -7,6 +7,7 @@ import { useAlertCount } from "@/lib/hooks/use-alert-count";
 import {
   LayoutDashboard,
   History,
+  Database,
   BellRing,
   BarChart3,
   Calendar,
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/signals", label: "Handelssignale", icon: BellRing },
+  { href: "/archive", label: "Datenarchiv", icon: Database },
   { href: "/trades", label: "Trades", icon: History },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/calendar", label: "Kalender", icon: Calendar },
@@ -33,6 +35,7 @@ const mobileNavItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/calendar", label: "Kalender", icon: Calendar },
   { href: "/signals", label: "Handelssignale", icon: BellRing },
+  { href: "/archive", label: "Datenarchiv", icon: Database },
   { href: "/trades", label: "Trades", icon: History },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/alerts", label: "Alerts", icon: Bell, showBadge: true },

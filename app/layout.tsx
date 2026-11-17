@@ -40,7 +40,7 @@ export default function RootLayout({
               Desktop (lg): fixe Höhe mit innerem Scroll-Container wie zuvor. */}
           <div className="flex min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: "#0C0C0F" }}>
             <Sidebar />
-            <main className="flex-1 lg:overflow-y-auto pt-[calc(52px_+_env(safe-area-inset-top))] pb-[calc(64px_+_env(safe-area-inset-bottom))] lg:pt-0 lg:pb-0">
+            <main className="min-w-0 flex-1 lg:overflow-y-auto pt-[calc(52px_+_env(safe-area-inset-top))] pb-[calc(64px_+_env(safe-area-inset-bottom))] lg:pt-0 lg:pb-0">
               {children}
             </main>
             <BottomTabBar />

@@ -359,3 +359,14 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Zielhebel 2,0 im API-Schema und in der Oberfläche ergänzt; bisherige Modellvarianten bleiben verfügbar. 33 Tests und Webpack-Produktionsbuild bestanden.
 
 - Aktualisierung `dae10f0` (Zielhebel 2 und Vontobel-Snapshots) erfolgreich live; Hostinger-Build `01a1e9bf-fb68-7207-b89b-36db3dc892a6` abgeschlossen. Abschließende Prüfung: Budget 1.500 EUR, Hebelziel 2, Produktfreigabe false, Überwachung weiterhin pausiert. Read-only-Kursprobe: Emittenten-Bid/Ask und tatsächlicher VX frisch, Yahoo-VIX beim Test **nicht** innerhalb der Fünf-Minuten-Grenze. Vor Aktivierung VIX-Feed/zeitliche Abdeckung klären; keine Kaufsignale aus veralteten Daten.
+
+## Langfristiges Datenarchiv (17.11.2026)
+
+- Nutzer beauftragt dauerhafte Speicherung und Auswertung von Daten-/Abrufmengen. Ist-Zustand: UI/Cache meist fünf Minuten, aber Hostinger-Cron-Liste leer; bisher kein verifizierter Dauerabruf.
+- Additive Tabellen `MarketObservation`, `MarketFetch`, `MarketCollectionRun`. Keine automatischen Löschungen. Bestehende Trading-Tabellen und generische Intraday-Daten bleiben erhalten.
+- Marktquellen instrumentiert: Yahoo-SDK-Aufrufe (interne Netzwerkaufrufe nicht bekannt) und direkte Vontobel-HTTP-Aufrufe. Payload-HTML nicht gespeichert; normalisierte Punkte und Antwortgrößen/Laufzeiten/Fehler.
+- VIX3M expliziter Indexproxy, aktuelle VX-Symbole getrennt; nicht eindeutig zuordenbare historische Basiswertreihen separat. Quellzeit und Empfangszeit getrennt; alte Kurse bleiben als solche markiert.
+- Geschützter Bereich `/archive` und zwei CSV-Exporte mit Zeitraum-/Quellen-/Instrumentenfilter, Streaming je 1.000 Zeilen. Signiertes Cookie von `/api/signals` auf `/api` erweitert. Nutzer hat `SIGNALS_ACCESS_KEY` inzwischen korrekt bei vix-trading.de gespeichert; Wert nicht ausgelesen.
+- Collector unabhängig von pausierten Handelsregeln, vorgesehen alle fünf Minuten Mo–Fr 08–22 Berlin mit bekannten Schließtagen und eigener minimaler Cron-Berechtigung. Budget/Strategie/Überwachung unverändert pausiert.
+- Neun Archiv-Tests, separater DB-Test (konkurrierende Collector-Läufe, persistierte Abrufe/Deduplizierung/Fehler) und HTTP-Exporttest mit 2.005 Zeilen über drei Seiten bestanden; 33 bestehende Tests unverändert erfolgreich. Desktop/390px-Ansicht geprüft, horizontalen Layoutüberlauf durch `min-w-0` am Hauptbereich behoben.
+- Details und Einschränkungen: `docs/ARCHIVE.md`. Produktionseinrichtung/erster echter Sammellauf werden nach Veröffentlichung verifiziert.
