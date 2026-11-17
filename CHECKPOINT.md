@@ -337,3 +337,5 @@ Setzen unter: Hostinger → Einsätze → Einstellungen und erneute Bereitstellu
 - Hostinger-Eintrag per Browser von `TELEGRAM_BOT` auf `TELEGRAM_BOT_TOKEN` korrigiert und per API verifiziert. Wert nicht ausgegeben; übrige Variablen erhalten.
 - Hostinger-Rebuild aus gespeicherter Quelle scheitert an fehlender `package.json`. Neuer vollständiger Quellstand muss bewusst bereitgestellt werden. Bisherige lokale Signaländerungen sind noch nicht deployed.
 - Geschützte Telegram-Verknüpfungsroute und Operator-Helfer ergänzt. Bestätigte Chat-ID kann ohne weitere manuelle Servervariable im vorhandenen VixCache gespeichert werden. Der Nutzer muss dafür nach Bereitstellung einen einmaligen persönlichen Startlink öffnen. Verbindung/Testnachricht noch nicht abgeschlossen.
+
+- Bereitstellung autorisiert. Vollständiges Archiv behebt fehlende package.json; Hostinger-Turbopack/PostCSS-Worker bricht intern ab. Produktionsbuild deshalb auf `next build --webpack` umgestellt; Neon/Prisma/ws als externe Serverpakete erhalten. Lokaler Webpack-Produktionsbuild bestanden.
