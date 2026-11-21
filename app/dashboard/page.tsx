@@ -154,7 +154,7 @@ export default function DashboardPage() {
   // SWR data hooks — cached across navigations, auto-revalidate
   const { data: vixData, error: vixError, isLoading: vixLoading } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
   const { data: history, error: historyError } = useSWR<HistoricalData>(
-    period !== "1d" ? `/api/vix/historical?period=${period}` : null, { keepPreviousData: false }
+    period !== "1d" ? `/api/vix/historical?period=${period}&view=chart` : null, { keepPreviousData: false }
   );
   const { data: intraday, error: intradayError } = useSWR<IntradayData>(
     "/api/vix/historical?type=intraday",

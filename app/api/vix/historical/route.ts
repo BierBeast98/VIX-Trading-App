@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getVixHistory, getVix3MHistory, getSP500History, getVixIntraday, getVixFuturesIntraday } from "@/lib/yahoo-finance";
+import { getVixHistory, getVix3MHistory, getSP500History, getVixIntraday, getVixFuturesIntraday, getIndexHourlyHistory } from "@/lib/yahoo-finance";
 import { prisma } from "@/lib/prisma";
 import { saveIntradayData, getStoredIntraday, mergeIntradayData } from "@/lib/vix-intraday-store";
 import { memGet, memSet } from "@/lib/server-cache";
@@ -55,6 +55,21 @@ export async function GET(req: NextRequest) {
       : period === "5y" ? 1825
       : period === "10y" ? 3650
       : 365; // default 1y
+    const chartHours: Record<string, number> = { '1w': 1, '1m': 5 };
+    if (searchParams.get('view') === 'chart' && chartHours[period]) {
+      const hours = chartHours[period];
+      const key = `chart_hourly_v2_${period}`;
+      const hit = memGet<object>(key);
+      if (hit) return NextResponse.json(hit, { headers: { 'Cache-Control': 'no-store' } });
+      const [vix, vix3m] = await Promise.all([
+        getIndexHourlyHistory('^VIX', days, hours),
+        getIndexHourlyHistory('^VIX3M', days, hours).catch(() => []),
+      ]);
+      if (!vix.length) return NextResponse.json({ error: 'Stündliche VIX-Daten nicht verfügbar' }, { status: 503 });
+      const data = { vix, vix3m, period, days, intervalHours: hours };
+      memSet(key, data, 5 * 60_000);
+      return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
+    }
     const cacheKey = `history_${period}`;
     const cacheTTL = days <= 30 ? 5 * 60_000 : 60 * 60_000;
     const histCC = { "Cache-Control": "no-store" };

@@ -18,6 +18,7 @@ import { de } from "date-fns/locale";
 interface DataPoint {
   date: string;
   close: number;
+  sourceAt?: string;
 }
 
 interface VixHistoryChartProps {
@@ -35,7 +36,7 @@ interface TooltipPayload {
 
 interface TooltipProps {
   active?: boolean;
-  payload?: (TooltipPayload & { payload?: { date?: string } })[];
+  payload?: (TooltipPayload & { payload?: { date?: string; sourceAt?: string } })[];
   label?: string;
 }
 
@@ -43,10 +44,12 @@ const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (active && payload && payload.length) {
     const spot = payload.find((p) => p.dataKey === "close");
     const fut = payload.find((p) => p.dataKey === "futures");
-    const rawDate = payload[0]?.payload?.date;
+    const rawDate = payload[0]?.payload?.sourceAt ?? payload[0]?.payload?.date;
     let dateLabel = "";
     try {
-      if (rawDate) dateLabel = format(new Date(rawDate), "d. MMM yyyy", { locale: de });
+      if (rawDate) dateLabel = rawDate.includes('T')
+        ? new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(rawDate)) + ' Uhr (Berlin)'
+        : format(new Date(`${rawDate}T12:00:00`), 'd. MMMM yyyy', { locale: de });
     } catch { /* noop */ }
     return (
       <div
@@ -129,7 +132,12 @@ function VixHistoryChartInner({
     return { formatted, minVal, maxVal, visibleTicks };
   }, [data, futuresData, labelFormat]);
 
+  if (!data.length) return <p style={{ color: '#8B8FA8', fontSize: 13 }}>Keine historischen Daten verfügbar.</p>;
+
+  const intervalLabel: Record<string, string> = { '1w': '1 Stunde', '1m': '5 Stunden', '3m': '1 Tag', '1y': '1 Tag', '5y': '1 Tag', '10y': '1 Tag' };
   return (
+    <div>
+    <p style={{ color: '#8B8FA8', fontSize: 11, marginBottom: 4 }}>Yahoo · letzter verfügbarer Kurs je {intervalLabel[period] ?? 'Intervall'} · VIX 3M ist ein Index, kein VX-Future</p>
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={formatted} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
         <defs>
@@ -204,6 +212,7 @@ function VixHistoryChartInner({
         )}
       </ComposedChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 

@@ -35,6 +35,26 @@ export interface HistoricalPoint {
   volume: number;
 }
 
+/** Hourly historical index observations for the dashboard, not daily backtests. */
+export async function getIndexHourlyHistory(symbol: '^VIX' | '^VIX3M', days: number, hours: number): Promise<HistoricalPoint[]> {
+  const result = await trackedYahoo(symbol, 'chart', () => (yahooFinance as any).chart(symbol, {
+    period1: new Date(Date.now() - days * 86400000).toISOString(),
+    interval: '1h',
+  })) as any;
+  const buckets = new Map<number, HistoricalPoint>();
+  for (const q of result?.quotes ?? []) {
+    const time = new Date(q.date).getTime();
+    if (!Number.isFinite(time) || !Number.isFinite(q.close) || q.close <= 0) continue;
+    const bucket = Math.floor(time / (hours * 3600000)) * hours * 3600000;
+    const existing = buckets.get(bucket);
+    // Yahoo returns bars in chronological order; use the last observed close in each bucket.
+    if (!existing || time >= new Date((existing as HistoricalPoint & { sourceAt: string }).sourceAt).getTime()) {
+      buckets.set(bucket, { date: new Date(bucket).toISOString(), sourceAt: new Date(time).toISOString(), close: q.close, open: q.open ?? q.close, high: q.high ?? q.close, low: q.low ?? q.close, volume: q.volume ?? 0 } as HistoricalPoint);
+    }
+  }
+  return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([, point]) => point);
+}
+
 async function fetchQuote(symbol: string): Promise<VixQuote | null> {
   try {
     const result = await trackedYahoo(symbol, 'quote', () => (yahooFinance as any).quote(symbol)) as any;
