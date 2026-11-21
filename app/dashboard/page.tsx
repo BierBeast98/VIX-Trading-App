@@ -410,7 +410,7 @@ export default function DashboardPage() {
           {/* VIX Future */}
           <div className="rounded-2xl p-3" style={{ background: "#141418", border: "1px solid #1E1E28" }}>
             <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8B8FA8" }}>VIX Future</span>
+              <span className="text-[10px] font-medium uppercase tracking-wide" style={{ color: "#8B8FA8" }}>{vFuture ? 'VIX Future' : 'VIX3M · Index-Proxy'}</span>
               {vFuture && <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "rgba(184,225,90,0.15)", color: "#B8E15A" }}>Vontobel</span>}
               {!vFuture && futures && <span className="text-[9px] px-1 py-0.5 rounded" style={{ background: "rgba(139,143,168,0.15)", color: "#8B8FA8" }}>VIX3M</span>}
             </div>
@@ -678,7 +678,7 @@ export default function DashboardPage() {
           {/* VIX Future */}
           <Card>
             <CardHeader>
-              <CardTitle>VIX Future</CardTitle>
+              <CardTitle>{vFuture ? 'VIX Future' : 'VIX3M · Index-Proxy'}</CardTitle>
               {vFuture && <Badge variant="accent">Vontobel</Badge>}
               {!vFuture && futures && <Badge variant="muted">VIX3M</Badge>}
             </CardHeader>

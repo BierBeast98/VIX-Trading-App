@@ -67,7 +67,7 @@ const CustomTooltip = ({
         )}
         {fut && fut.value != null && (
           <p className="font-medium mb-0.5" style={{ color: "#F59E0B" }}>
-            VIX Future: {(fut.value as number).toFixed(2)}
+            Vergleichswert: {(fut.value as number).toFixed(2)}
           </p>
         )}
         <p style={{ color: "#8B8FA8" }}>{label}</p>
