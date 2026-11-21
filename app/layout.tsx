@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/layout/sidebar";
 import { BottomTabBar } from "@/components/layout/bottom-tab-bar";
 import { SWRProvider } from "@/lib/swr-config";
+import { AccessGate } from "@/components/auth/access-gate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,6 +37,7 @@ export default function RootLayout({
     <html lang="de" className="dark">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <SWRProvider>
+          <AccessGate>
           {/* Mobil: das Dokument selbst scrollt (iOS-Toolbar fährt ein, Momentum-Scroll funktioniert).
               Desktop (lg): fixe Höhe mit innerem Scroll-Container wie zuvor. */}
           <div className="flex min-h-[100dvh] lg:h-screen lg:overflow-hidden" style={{ background: "#0C0C0F" }}>
@@ -45,6 +47,7 @@ export default function RootLayout({
             </main>
             <BottomTabBar />
           </div>
+          </AccessGate>
         </SWRProvider>
       </body>
     </html>

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
-import { BellRing, Check, ChevronDown, LockKeyhole, RefreshCw, Send, ShieldCheck } from 'lucide-react';
+import { BellRing, Check, ChevronDown, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { type State, type Config, type Signal, roundMetrics, marketOpen } from '@/lib/signals/engine';
@@ -69,7 +69,7 @@ function SignalCard({ signal, onDone }: { signal: SignalWithFeed; onDone: () => 
 }
 export default function SignalsPage() {
   const { data, error: networkError, mutate } = useSWR<Payload>('/api/signals', url => fetch(url, { cache: 'no-store' }).then(r => r.json()), { refreshInterval: 30000 });
-  const [key, setKey] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
   const [config, setConfig] = useState<Config | null>(null), [showConfig, setShowConfig] = useState(false);
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(t => t + 1), 30000); return () => clearInterval(timer); }, []);
@@ -80,15 +80,7 @@ export default function SignalsPage() {
   }
   if (!data && !networkError) return <div className="p-6 text-[#8B8FA8]">Signale werden geladen …</div>;
   if (networkError || (data?.error && data.configured === undefined)) return <div className="p-6 text-red-400">{networkError?.message ?? data?.error}</div>;
-  if (data?.error) return <div className="mx-auto max-w-lg p-6 lg:pt-12"><div className={panel}>
-    <LockKeyhole size={28} className="mb-4 text-[#B8E15A]" /><h1 className="text-2xl font-bold text-white">Handelssignale</h1>
-    <p className="my-4 text-sm text-[#8B8FA8]">Dein geschützter Bereich für Kauf- und Verkaufssignale und ausgeführte Trades.</p>
-    {data.configured ? <form onSubmit={e => { e.preventDefault(); void action(() => request('/api/signals/session', 'POST', { key }).then(result => { setKey(''); return result; }), 'Signalbereich entsperrt'); }}>
-      <Input label="Persönlicher Zugangsschlüssel" type="password" autoComplete="current-password" value={key} onChange={e => setKey(e.target.value)} required />
-      <Button className="mt-4" type="submit" variant="primary" loading={busy}>Entsperren</Button>
-    </form> : <p className="text-sm text-amber-300">Der Signalbereich ist noch nicht freigeschaltet. Ein persönlicher Zugangsschlüssel muss auf dem Server eingerichtet werden.</p>}
-    {message && <p role="status" className="mt-3 text-sm text-amber-300">{message}</p>}
-  </div></div>;
+  if (data?.error) return <div role="alert" className="p-6 text-red-400">{data.error}</div>;
   if (!data?.config || !config) return null;
   const pending = data.signals.filter(s => s.status === 'pending');
   const history = data.signals.filter(s => s.status !== 'pending');
@@ -104,21 +96,16 @@ export default function SignalsPage() {
   const set = <K extends keyof Config>(k: K, v: Config[K]) => setConfig({ ...config, [k]: v });
   const refresh = () => { void mutate(); };
   return <div className="mx-auto max-w-6xl space-y-6 p-4 lg:p-8">
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-2 text-xs uppercase tracking-[.2em] text-[#B8E15A]">Deine Strategie · Deine Ausführung</p><h1 className="text-3xl font-bold text-white">Handelssignale</h1><p className="mt-2 max-w-xl text-sm text-[#8B8FA8]">Die App überwacht die Regeln. Du handelst beim Broker und schickst danach den Screenshot im Chat.</p></div>
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-2 text-xs uppercase tracking-[.2em] text-[#B8E15A]">Deine Strategie · Deine Ausführung</p><h1 className="text-3xl font-bold text-white">Handelssignale</h1></div>
       <Button loading={busy} onClick={() => action(() => request('/api/signals/check', 'POST'), 'Prüflauf abgeschlossen')}><RefreshCw size={16} />Jetzt prüfen</Button>
     </header>
     {message && <p role="status" className="rounded-xl border border-[#B8E15A]/20 p-4 text-sm text-[#B8E15A]">{message}</p>}
     <section className={`${panel} flex flex-wrap items-start justify-between gap-4`}><div className="flex gap-3"><span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${!data.config.enabled ? 'bg-[#8B8FA8]' : !open ? 'bg-amber-400' : stale ? 'bg-red-400' : 'bg-[#B8E15A]'}`} /><div><p className="font-medium text-white">{!data.config.enabled ? 'Überwachung pausiert' : !open ? 'Broker-Handelsfenster geschlossen' : stale ? 'Prüflauf überfällig' : 'Überwachung eingerichtet'}</p><p className="mt-1 text-sm text-[#8B8FA8]">{data.health}</p><p className="mt-1 text-xs text-[#8B8FA8]">Letzte Prüfung: {data.checkedAt ? time(data.checkedAt) : 'noch keine'} · {data.config.broker || 'Broker nicht eingerichtet'} {data.config.opensAt && `${data.config.opensAt}–${data.config.closesAt} Uhr, Europe/Berlin`}</p></div></div><Button variant="ghost" onClick={() => { setConfig(data.config); setShowConfig(!showConfig); }}>Einrichtung {showConfig ? 'schließen' : 'öffnen'}</Button></section>
-    <div className="rounded-xl border border-[#2E2E3A] p-3 text-sm text-[#8B8FA8]">
-      <p>{entryPolicy === 'delayed20' ? 'Einstieg: Yahoo, bis 20 Min. Kursalter. Ein kostenpflichtiger Datenzugang ist für diese Regel nicht erforderlich.' : 'Einstieg: Echtzeit-VIX, bis 5 Min. Kursalter. Verzögerte Kurse lösen bei dieser Einstellung keine Käufe aus.'}</p>
-      <p className="mt-1">Ausstieg: Vontobel-Geldkurs bis 5 Min. Der zuletzt bekannte Kurs ist kein garantierter Ausführungspreis.</p>
-      <p className="mt-1">Yahoo-Kurse sind typischerweise etwa 15 Min. verzögert; die Signalprüfung ist alle 5 Min. vorgesehen.</p>
-      {data.quote && <p className="mt-1">Vontobel-Kurszeit: {Number.isFinite(productTime) ? `${time(data.quote.productAt!)} Uhr (Berlin)` : 'unbekannt'} · {productAgeText}</p>}
-    </div>
+    <div className="text-xs text-[#8B8FA8]">VIX: {entryPolicy === 'delayed20' ? 'Yahoo · Kursalter max. 20 Min.' : 'Echtzeit · max. 5 Min. alt'}{data.quote && <> · Vontobel: {Number.isFinite(productTime) ? time(data.quote.productAt!) : 'Zeit unbekannt'} · {productAgeText}</>} · Kurse sind keine garantierten Ausführungspreise.</div>
     <section className={panel}>
       <h2 className="text-lg font-semibold text-white">VIX-Niveau-Meldungen</h2>
-      <p className="mt-2 text-sm text-[#8B8FA8]">15,5 / 14,5 / 13,5: Meldung beim Erreichen oder Unterschreiten, unabhängig vom Zertifikat und dessen Kaufbedingungen. Auch beim ersten gültigen Abruf unter einem Niveau. Erneute Meldung erst nach einem Anstieg darüber. Prüfung alle fünf Minuten im eingerichteten Handelsfenster; Yahoo-Kurse bis zu 20 Minuten verzögert.</p>
       <p className="mt-2 text-sm text-[#8B8FA8]">{!data.config.enabled ? 'Niveau-Überwachung pausiert' : !open ? 'Außerhalb des Handelsfensters' : stale ? 'Letzter Prüflauf überfällig' : 'Niveau-Überwachung eingerichtet'} · Eine Niveau-Meldung bestätigt keine Kaufbedingungen.</p>
+      <p className="mt-2 text-sm text-[#8B8FA8]">Niveaus 15,5 / 14,5 / 13,5 · Prüfung etwa alle 5 Minuten im Handelsfenster · VIX-Kurs kann bis zu 20 Minuten verzögert sein.</p>
       <p className="mt-2 text-sm text-[#8B8FA8]">Du wählst und kaufst das Zertifikat selbst. Ein eigenständig gekaufter Trade wird derzeit nicht automatisch zur überwachten Signalrunde; die Aufnahme in die Renditeüberwachung ist noch nicht eingerichtet.</p>
       {!(data.levels?.events?.length) && <p className="mt-4 text-sm text-[#8B8FA8]">Noch keine Niveau-Meldung aufgezeichnet.</p>}
       {(data.levels?.events ?? []).slice(0, 10).map(event => <div key={event.id} className="mt-4 border-t border-[#1E1E28] pt-3 text-sm text-[#8B8FA8]">
@@ -127,13 +114,14 @@ export default function SignalsPage() {
         <p>{(['telegram', 'email'] as const).map(channel => `${channel === 'telegram' ? 'Telegram' : 'E-Mail'}: ${event.notification[channel]?.sentAt ? 'vom Anbieter angenommen' : !data.config[channel] ? 'deaktiviert' : event.notification[channel]?.error ?? (Date.now() - Date.parse(event.at) > 1800000 ? 'Versandfenster abgelaufen' : 'Versand ausstehend')}`).join(' · ')}</p>
       </div>)}
     </section>
+    <section><div className="mb-4 flex items-center gap-2"><BellRing size={18} className="text-[#B8E15A]" /><h2 className="text-lg font-semibold text-white">Jetzt zu beachten</h2></div><div className="space-y-4">{pending.length ? pending.map(s => <SignalCard key={s.id} signal={s} onDone={refresh} />) : <div className={`${panel} py-9 text-center`}><ShieldCheck className="mx-auto mb-3 text-[#8B8FA8]" size={30} /><p className="font-medium text-white">Kein offenes Handelssignal</p><p className="mt-2 text-sm text-[#8B8FA8]">{data.config.enabled ? 'Hier erscheinen Kauf- und Verkaufssignale, sobald ihre jeweiligen Bedingungen erfüllt sind.' : 'Aktiviere die Überwachung in der Einrichtung.'}</p></div>}</div></section>
     <section className="grid gap-3 sm:grid-cols-3">
       {[['Strategiekapital', euro(r?.capital ?? data.config.capital), r ? 'Für diese Runde festgeschrieben' : 'Budget für die nächste Runde'], ['Bestätigter Einsatz', euro(r?.spent ?? 0), 'Kumulierte Käufe inklusive Gebühren'], ['Offene Signale', String(pending.length), 'Signal ist keine ausgeführte Order']].map(([label, value, sub]) => <div key={label} className={panel}><p className="text-xs text-[#8B8FA8]">{label}</p><p className="my-2 text-2xl font-semibold text-white">{value}</p><p className="text-xs text-[#8B8FA8]">{sub}</p></div>)}
     </section>
     {r && <section className={panel}><h2 className="font-semibold text-white">Offene Signalrunde · Variante {r.config.variant}</h2><div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4"><div><p className="text-xs text-[#8B8FA8]">Bestand</p><p className="mt-1 text-white">{r.lots.reduce((n, l) => n + l.quantity, 0)} Stück</p></div><div><p className="text-xs text-[#8B8FA8]">Rundenergebnis, letzter Kurs</p><p className="mt-1 text-white">{metrics ? euro(metrics.pnl) : 'Kurs fehlt'}</p></div><div><p className="text-xs text-[#8B8FA8]">Trailing</p><p className="mt-1 text-white">{r.trailing ? `Aktiv · Faktor ${r.floorFactor.toFixed(4)}` : 'Ab +10 %'}</p></div><div><p className="text-xs text-[#8B8FA8]">Beginn</p><p className="mt-1 text-white">{time(r.startedAt)}</p></div></div><p className="mt-4 text-xs text-[#8B8FA8]">Bewertung anhand des letzten Geldkurses {data.quote?.productAt ? time(data.quote.productAt) : '(fehlt)'}. Erwartete Verkaufsgebühren sind noch nicht abgezogen; bestätigte Gebühren sind enthalten.</p></section>}
 
-    <section><div className="mb-4 flex items-center gap-2"><BellRing size={18} className="text-[#B8E15A]" /><h2 className="text-lg font-semibold text-white">Jetzt zu beachten</h2></div><div className="space-y-4">{pending.length ? pending.map(s => <SignalCard key={s.id} signal={s} onDone={refresh} />) : <div className={`${panel} py-9 text-center`}><ShieldCheck className="mx-auto mb-3 text-[#8B8FA8]" size={30} /><p className="font-medium text-white">Kein offenes Handelssignal</p><p className="mt-2 text-sm text-[#8B8FA8]">{data.config.enabled ? 'Hier erscheinen Kauf- und Verkaufssignale, sobald ihre jeweiligen Bedingungen erfüllt sind.' : 'Aktiviere die Überwachung in der Einrichtung.'}</p></div>}</div></section>
-    {showConfig && <section className={panel}><h2 className="text-xl font-semibold text-white">Strategie & Benachrichtigungen</h2><p className="mt-2 text-sm text-[#8B8FA8]">Long-Kaskade 30 / 40 / 50 %, maximal 50 % Einsatz. Kein weiterer Kauf bei 12,5. Trailing ab +10 % mit 8 / 6 / 5 % Abstand. {locked && 'Produkt und Strategie sind während offener Signale oder einer Runde gesperrt.'}</p>
+
+    {showConfig && <section className={panel}><h2 className="text-xl font-semibold text-white">Strategie & Benachrichtigungen</h2>{locked && <p className="mt-2 text-sm text-amber-300">Produkt und Strategie sind während offener Signale oder einer Runde gesperrt.</p>}
       <form className="mt-6 space-y-6" onSubmit={e => { e.preventDefault(); void action(() => request('/api/signals', 'PUT', { ...config, closedDates: config.closedDates.filter(Boolean) }), 'Einrichtung gespeichert'); }}>
         <p className="text-xs text-[#8B8FA8]">Das Strategiekapital wird aus bestätigten Ausführungen fortgeschrieben. Ein- und Auszahlungen bitte zuerst abstimmen.</p><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Input label="Strategiekapital in EUR" type="number" min="1" step="any" disabled={locked || !!data.capitalManaged} value={config.capital} onChange={e => set('capital', Number(e.target.value))} />
@@ -158,9 +146,18 @@ export default function SignalsPage() {
         </div>
         <Button type="submit" variant="primary" loading={busy}>Einrichtung speichern</Button>
       </form>
-      <div className="mt-6 rounded-xl bg-[#1A1A22] p-4"><div className="flex items-center gap-2 font-medium text-white"><Send size={16} />Telegram plus E-Mail</div><p className="mt-2 text-sm text-[#8B8FA8]">Telegram wird einmalig über deinen eigenen Bot verbunden. Die E-Mail-Adresse wird aus den App-Einstellungen übernommen. Verkaufssignale werden während der Handelszeiten alle 15 Minuten erinnert, bis eine Ausführung oder „Nicht ausgeführt“ erfasst ist.</p></div>
+      <div className="mt-6 rounded-xl bg-[#1A1A22] p-4"><div className="flex items-center gap-2 font-medium text-white"><Send size={16} />Telegram plus E-Mail</div><p className="mt-2 text-sm text-[#8B8FA8]">E-Mail aus den Einstellungen · Verkaufserinnerung alle 15 Minuten während der Handelszeiten.</p><Button className="mt-3" loading={busy} onClick={() => action(() => request('/api/telegram/test', 'POST'), 'Testnachricht von Telegram angenommen')}>Telegram-Testnachricht senden</Button></div>
     </section>}
     {history.length > 0 && <section><h2 className="mb-4 text-lg font-semibold text-white">Signalverlauf</h2><div className="space-y-4">{history.slice(0, 30).map(s => <SignalCard key={s.id} signal={s} onDone={refresh} />)}</div></section>}
     {data.executions.length > 0 && <section className={panel}><h2 className="font-semibold text-white">Bestätigte Ausführungen</h2><div className="mt-4 divide-y divide-[#1E1E28]">{data.executions.slice(0, 20).map(e => <div key={e.id} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><div><p className="text-white">{e.side === 'buy' ? 'Kauf' : 'Verkauf'} · {e.quantity} × {euro(e.price)}</p><p className="mt-1 text-xs text-[#8B8FA8]">{e.isin} · {time(e.at)}{e.note && ` · ${e.note}`}</p></div><p className="text-[#8B8FA8]">Gebühren {euro(e.fees)}</p></div>)}</div></section>}
+    <details className={`${panel} text-sm text-[#8B8FA8]`}>
+      <summary className="cursor-pointer font-medium text-white">Hinweise zur Überwachung</summary>
+      <div className="mt-4 space-y-3">
+        <p>Die App überwacht die Regeln. Du handelst beim Broker und erfasst anschließend die tatsächliche Ausführung.</p>
+        <p>Einstieg: {entryPolicy === 'delayed20' ? 'Yahoo-Kurse bis 20 Minuten alt' : 'Echtzeit-VIX bis 5 Minuten alt'}. Ausstieg: Vontobel-Geldkurs bis 5 Minuten alt. Der zuletzt bekannte Kurs ist kein garantierter Ausführungspreis.</p>
+        <p>VIX-Niveaus 15,5 / 14,5 / 13,5: Meldung beim Erreichen oder Unterschreiten, auch beim ersten gültigen Abruf darunter. Eine erneute Meldung erfolgt nach einem Anstieg darüber. Eine Niveau-Meldung bestätigt keine Kaufbedingungen.</p>
+        <p>Die Long-Kaskade beträgt 30 / 40 / 50 %, maximal 50 % Einsatz; bei 12,5 erfolgt kein weiterer Kauf. Trailing ab +10 % mit 8 / 6 / 5 % Abstand.</p>
+      </div>
+    </details>
   </div>;
 }

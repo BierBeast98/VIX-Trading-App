@@ -26,7 +26,7 @@ Aktuelle Emittentenseiten können einen konkreten VX-Vertrag mit Symbol benennen
 
 Kein automatisches Löschen oder Überschreiben des Archivs. PostgreSQL ist dauerhafter Speicher über App-Neustarts und Deployments hinweg. Das ist kein unabhängiges externes Backup. Eigene CSV-Sicherungen sind möglich. Datenbanktarif und Speicherkapazität müssen bei wachsendem Archiv beobachtet werden; es erfolgen keine automatischen Tarifwechsel.
 
-`/archive` zeigt Gesamtbestand, Speichergröße inklusive Indizes, Quellenabrufe und Fehler pro Tag, Datenreihen und Quellzeiten sowie Qualitätsklassen. Zugang über den vom Nutzer in Hostinger hinterlegten `SIGNALS_ACCESS_KEY`. Das signierte HttpOnly-Cookie gilt nun für `/api`, sodass Signalbereich und Archiv dieselbe Anmeldung verwenden können. Ältere auf `/api/signals` beschränkte Cookies erfordern eine neue Anmeldung im Archiv.
+`/archive` zeigt Gesamtbestand, Speichergröße inklusive Indizes, Quellenabrufe und Fehler pro Tag, Datenreihen und Quellzeiten sowie Qualitätsklassen. Zugang über die zentrale Website-Anmeldung mit E-Mail und Passwort (siehe [AUTH.md](AUTH.md)); Archiv und Signalbereich verwenden dieselbe Sitzung.
 
 - `/api/archive/export?type=quotes`: Kursdaten.
 - `/api/archive/export?type=requests`: Abrufprotokoll.

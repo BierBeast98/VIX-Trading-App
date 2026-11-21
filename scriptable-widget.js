@@ -4,7 +4,10 @@
 // SETUP:
 //   1. "Scriptable" kostenlos im App Store installieren
 //   2. Dieses Script in Scriptable einfügen (New Script)
-//   3. Widget auf dem Home Screen hinzufügen → Scriptable auswählen
+//   3. In Scriptable einmal ein separates Script ausführen:
+//      Keychain.set("vix-trading-access-key", "DEIN_ZUGANGSSCHLUESSEL")
+//      Danach das separate Script mit dem Schlüssel wieder löschen.
+//   4. Widget auf dem Home Screen hinzufügen → Scriptable auswählen
 //      → dieses Script wählen
 // ============================================================
 
@@ -23,10 +26,13 @@ async function fetchData() {
   const url = "https://vix-trading.de/api/widget";
   let rawText = null;
   try {
+    if (!Keychain.contains("vix-trading-access-key")) throw new Error("Zugangsschlüssel im Scriptable-Schlüsselbund fehlt");
     const req = new Request(url);
+    req.headers = { Authorization: `Bearer ${Keychain.get("vix-trading-access-key")}` };
     req.timeoutInterval = 15;
     rawText = await req.loadString();
     const json = JSON.parse(rawText);
+    if (json.error) throw new Error("Widget-Zugriff fehlgeschlagen: " + json.error);
     return { ok: true, data: json, url };
   } catch (e) {
     return {

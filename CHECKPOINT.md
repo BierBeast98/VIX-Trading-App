@@ -472,3 +472,34 @@ Live-Verifikation: Die öffentliche /signals-Seite antwortet mit HTTP 200 und li
 
 ## Lokale Arbeit: VIX-Abrufe bündeln und archivieren
 Collector ruft nur Yahoo-VIX ab, speichert pro Intervall eine Beobachtung unter stabilem Slot-Schlüssel mit Quell- und Empfangszeit; neue MarketObservation-Daten anderer Instrumente werden nicht mehr gespeichert, historische Daten und Abrufstatistiken bleiben erhalten. Signalprüfung liest bei delayed20 möglichst eine in den letzten vier Minuten empfangene, quellenzeitlich max. 20 Minuten alte Yahoo-Beobachtung und holt bei Fehlen selbst einen Wert. Bei überlappenden Jobs, Ausfällen und weiteren App-Abrufen sind weiterhin zusätzliche Abfragen möglich. Keine OHLC-Kerzen oder Echtzeit versprechen. Änderungen ausschließlich lokal; kein Deployment ohne ausdrücklichen Wunsch.
+
+### Lokale UI-, Sicherheits- und Datenprüfung (21.11.2026)
+
+- Lokaler Zugriffsschutz für Finanz-/Einstellungs-APIs mit bestehendem Signal-Zugangsschlüssel und zentraler Anmeldung vorbereitet. Öffentliche VIX-Spot-Anzeige und unabhängig authentifizierte Cron-/Telegram-Routen bleiben gesondert behandelt. Kein Deployment in dieser Arbeit.
+- iOS-Scriptable-Widget für Zugriffsschlüssel im Scriptable-Schlüsselbund vorbereitet; Einrichtung und iPhone-Test stehen aus. Zielumgebung muss SIGNALS_ACCESS_KEY gesetzt haben.
+- Dashboard/Kalender zeigen Ladefehler und veraltete Daten erkennbarer; Einstellungen melden Lese-/Schreibfehler, Archivfilter verhindert umgekehrte Datumsbereiche und Trades zeigen Löschfehler. Kursabrufe geteilt, veraltete Produktantworten beim ISIN-Wechsel ignoriert.
+- Legacy-Alerts prüfen das originale Kursalter; Archiv-Schreibfehler werden pro Sammellauf erfasst; DB-Cache erhält nur die verbleibende Laufzeit. Kein realer Alert ausgelöst.
+- Produktionsbuild und TypeScript erfolgreich, 122 nicht-DB-Tests bestanden; zwei Integrationstests verweigern Betrieb ohne dedizierte lokale Testdatenbank. Visuelle Browserprüfung wegen Umgebungsfehler nicht erfolgt.
+- Offen: tatsächliche Hostinger-Cron-Konfiguration und ggf. doppelte Signalprüfungen, belastbarer Schutz gegen Schlüsselversuche an allen Zugängen, Test auf iPhone, Rollout und Live-Verifikation. Zugangsschutz ist lokal, daher Live-Sicherheit nicht als behoben betrachten.
+
+- Sicherheitsupdates lokal: Next.js und eslint-config-next auf 16.4.6 aktualisiert, kompatible npm-Abhängigkeiten aktualisiert; npm audit in der Testkopie meldet 0 Schwachstellen. Build, Fachtests und HTTP-Zugriffstests mit aktualisierten Paketen bestanden. Keine Veröffentlichung.
+
+### Einheitliche Website-Anmeldung (21.11.2026)
+
+- Lokal von Zugangsschlüssel-Formular auf zentrale Anmeldung mit E-Mail und Passwort umgestellt. Eine signierte HttpOnly-Sitzung gilt sieben Tage für alle Bereiche; separate Loginformulare in Signalen und Archiv entfernt.
+- E-Mail, gesalzener scrypt-Passworthash und separates Sitzungsgeheimnis sind in der Zielumgebung einzurichten; siehe docs/AUTH.md und scripts/create-auth-hash.mjs. Die vom Nutzer gewünschte Login-Adresse ist noch nicht in der Zielumgebung eingerichtet. Kein Passwort im Chat erhalten oder im Repository gespeichert. SIGNALS_ACCESS_KEY bleibt für Widget-/API-Bearer, Cron-Zugänge bleiben erhalten.
+- Lokaler Produktionsbuild und gezielte Login-/Proxy-/Signal- und Feedtests bestanden. Das iOS-Widget, ein visueller Browserlauf und eine Veröffentlichung wurden nicht geprüft/durchgeführt. Schutz gegen massenhafte Passwort- und Bearer-Versuche bleibt offen.
+
+### Seitentexte gestrafft (21.11.2026)
+
+- Archiv, Signale, Analytics, Einstellungen, Dashboard und Trades textlich gestrafft; weiterführende Erklärungen auf Wunsch größtenteils am Seitenende aufklappbar. Zeitkritische Daten, Fehlermeldungen sowie finanzielle Einschränkungen bleiben bei den jeweiligen Inhalten.
+- Produktionsbuild inkl. TypeScript erfolgreich; keine visuelle Prüfung und keine Veröffentlichung. Bisheriges Passwort soll erhalten bleiben; seine Herkunft ist noch ungeklärt.
+
+### Verständlichkeit von Dashboard und Signalen
+- Niveau-Meldungen stehen vor Handelssignalen; leere Historie, Überwachungsfenster, überfälliger Lauf, deaktivierte Kanäle und Grenzen der manuellen Renditeüberwachung sind klarer. Manueller Prüflauf zeigt eine Überspringungsbegründung statt pauschalem Erfolg.
+- Dashboard bezeichnet den VIX3M-Index-Proxy explizit; Chart-Tooltip behauptet keinen Future. Änderungen lokal, nicht veröffentlicht. Build erfolgreich; gezielter ESLint meldet bestehende Fehler in den betroffenen Dateien; Sichtprüfung steht aus.
+
+### Login mit bestehendem Zugangsschlüssel
+- AUTH_EMAIL und AUTH_SESSION_SECRET bei Hostinger laut Variablennamen vorhanden; Werte sind über API maskiert, tatsächlicher Login muss nach Veröffentlichung durch den Nutzer geprüft werden. SIGNALS_ACCESS_KEY dient unverändert als Passwort und Widget-Bearer; separater Session-Secret.
+- Prozessübergreifender atomarer DB-Limiter: 8 Loginversuche und 120 Bearer-Anfragen pro 15 Minuten global, inkl. erfolgreicher Versuche. Fail-closed bei DB-Ausfall, eigenes Cron-Token ausgenommen, kein Vertrauen in IP-Header. Absichtliche temporäre Aussperrung bleibt möglich.
+- Telegram-Testnachricht: geschützte Route und Schaltfläche vorbereitet; keinerlei Handelssignal. Neue Auth-/Limit- und Signaltests, lokaler Produktionsbuild bestanden; PostgreSQL-Konkurrenztest auf separater lokaler Testdatenbank durch Reviewer erfolgreich. Vor Freigabe Live-Login und Versand prüfen.

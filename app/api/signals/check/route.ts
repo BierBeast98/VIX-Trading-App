@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { allowed, cronAllowed, sameOrigin } from '@/lib/signals/auth';
 import { monitorCronAllowed, recordMonitorRun } from '@/lib/signals/schedule';
 import { runSignalsCheck } from '@/lib/signals/service';
+import { limitBearer } from '@/lib/signals/rate-limit';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 90;
 export async function GET(req: NextRequest) {
@@ -9,6 +10,8 @@ export async function GET(req: NextRequest) {
   return run(true);
 }
 export async function POST(req: NextRequest) {
+  const blocked = await limitBearer(req);
+  if (blocked) return blocked;
   if (!allowed(req) || !sameOrigin(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   return run();
 }
