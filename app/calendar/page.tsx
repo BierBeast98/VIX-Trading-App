@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import useSWR from "swr";
-import { ChevronLeft, ChevronRight, AlertTriangle, Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CorrelationChart } from "@/components/charts/CorrelationChart";
@@ -70,17 +70,21 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [countryFilter, setCountryFilter] = useState("Alle");
 
-  const { data: events = [] } = useSWR<EconomicEvent[]>(
-    `/api/calendar?type=month&year=${year}&month=${month}`
+  const { data: monthEvents, error: monthError, isLoading: monthLoading } = useSWR<EconomicEvent[]>(
+    `/api/calendar?type=month&year=${year}&month=${month}`, { keepPreviousData: false }
   );
-  const { data: upcomingEvents = [] } = useSWR<EconomicEvent[]>(
+  const events = monthEvents ?? [];
+  const { data: upcomingData, error: upcomingError, isLoading: upcomingLoading } = useSWR<EconomicEvent[]>(
     "/api/calendar?type=upcoming&days=30"
   );
-  const { data: histData } = useSWR<{ vix: { date: string; close: number }[]; sp500: { date: string; close: number }[] }>(
+  const upcomingEvents = upcomingData ?? [];
+  const { data: histData, error: historyError, isLoading: historyLoading } = useSWR<{ vix: { date: string; close: number }[]; sp500: { date: string; close: number }[] }>(
     "/api/vix/historical?period=3m"
   );
 
-  const loading = !events.length && !upcomingEvents.length && !histData;
+  const loading = (!monthEvents && monthLoading) || (!upcomingData && upcomingLoading) || (!histData && historyLoading);
+  const unavailable = (!monthEvents && monthError) || (!upcomingData && upcomingError) || (!histData && historyError);
+  const hasStaleData = !!(monthError || upcomingError || historyError);
 
   const correlationData = useMemo(() => {
     if (!histData?.vix || !histData?.sp500) return [];
@@ -99,11 +103,13 @@ export default function CalendarPage() {
   }, [histData]);
 
   const prevMonth = () => {
+    setSelectedDate(null);
     if (month === 1) { setMonth(12); setYear(y => y - 1); }
     else setMonth(m => m - 1);
   };
 
   const nextMonth = () => {
+    setSelectedDate(null);
     if (month === 12) { setMonth(1); setYear(y => y + 1); }
     else setMonth(m => m + 1);
   };
@@ -137,18 +143,22 @@ export default function CalendarPage() {
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
       <h1 className="text-2xl font-bold text-white">Wirtschaftskalender</h1>
 
-      {loading ? (
+      {unavailable ? (
+        <p role="alert" className="text-sm text-red-400">Kalenderdaten konnten nicht geladen werden. Bitte prüfe deine Verbindung und lade die Seite erneut.</p>
+      ) : loading ? (
         <div className="flex justify-center py-12">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
         </div>
       ) : (
         <>
+          {hasStaleData && <p role="alert" className="text-sm text-amber-300">Die Aktualisierung ist fehlgeschlagen. Angezeigte Daten können veraltet sein.</p>}
           {/* Country filter */}
       <div className="flex flex-wrap gap-2">
         {COUNTRIES.map((c) => (
           <button
             key={c}
             onClick={() => setCountryFilter(c)}
+            aria-pressed={countryFilter === c}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all"
             style={{
               background: countryFilter === c ? "#B8E15A22" : "#141418",
@@ -168,13 +178,13 @@ export default function CalendarPage() {
               <Card>
                 {/* Month navigation */}
                 <div className="flex items-center justify-between mb-6">
-                  <button onClick={prevMonth} className="rounded-lg p-2 hover:bg-[#1E1E28] transition-colors" style={{ color: "#8B8FA8" }}>
+                  <button onClick={prevMonth} aria-label="Vorheriger Monat" className="rounded-lg p-2 hover:bg-[#1E1E28] transition-colors" style={{ color: "#8B8FA8" }}>
                     <ChevronLeft size={18} />
                   </button>
                   <h2 className="text-base font-semibold text-white">
                     {MONTHS_DE[month - 1]} {year}
                   </h2>
-                  <button onClick={nextMonth} className="rounded-lg p-2 hover:bg-[#1E1E28] transition-colors" style={{ color: "#8B8FA8" }}>
+                  <button onClick={nextMonth} aria-label="Nächster Monat" className="rounded-lg p-2 hover:bg-[#1E1E28] transition-colors" style={{ color: "#8B8FA8" }}>
                     <ChevronRight size={18} />
                   </button>
                 </div>
@@ -201,6 +211,8 @@ export default function CalendarPage() {
                       <button
                         key={i}
                         onClick={() => setSelectedDate(isSelected ? null : dateStr)}
+                        aria-label={`${day}. ${MONTHS_DE[month - 1]} ${year}, ${dayEvents.length} Termine`}
+                        aria-pressed={isSelected}
                         className="flex flex-col items-center p-1.5 rounded-lg transition-all min-h-[52px]"
                         style={{
                           background: isSelected ? "#B8E15A22" : isToday ? "#1E1E28" : "transparent",

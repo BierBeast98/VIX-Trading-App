@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { memGet, memSet } from "@/lib/server-cache";
 
 const CACHE_TTL = 60_000; // 1 minute — product data changes rarely
-const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
+const CC = { "Cache-Control": "no-store" };
 
 const HEADERS = {
   "User-Agent":

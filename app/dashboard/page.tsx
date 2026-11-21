@@ -124,6 +124,9 @@ interface Trade {
   returnPct: number | null;
 }
 
+const EMPTY_POSITIONS: Position[] = [];
+const EMPTY_TRADES: Trade[] = [];
+
 type Period = "1d" | "1w" | "1m" | "3m" | "1y" | "5y" | "10y";
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -149,45 +152,48 @@ export default function DashboardPage() {
   const { mutate: globalMutate } = useSWRConfig();
 
   // SWR data hooks — cached across navigations, auto-revalidate
-  const { data: vixData } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
-  const { data: history } = useSWR<HistoricalData>(
-    period !== "1d" ? `/api/vix/historical?period=${period}` : null
+  const { data: vixData, error: vixError, isLoading: vixLoading } = useSWR<VixData>("/api/vix/spot", { refreshInterval: getRefreshInterval() });
+  const { data: history, error: historyError } = useSWR<HistoricalData>(
+    period !== "1d" ? `/api/vix/historical?period=${period}` : null, { keepPreviousData: false }
   );
-  const { data: intraday } = useSWR<IntradayData>(
+  const { data: intraday, error: intradayError } = useSWR<IntradayData>(
     "/api/vix/historical?type=intraday",
     { refreshInterval: getRefreshInterval() }
   );
-  const { data: positions = [] } = useSWR<Position[]>("/api/positions", { refreshInterval: getRefreshInterval() });
-  const { data: trades = [] } = useSWR<Trade[]>("/api/trades", { refreshInterval: getRefreshInterval() });
+  const { data: positionsData, error: positionsError, isLoading: positionsLoading } = useSWR<Position[]>("/api/positions", { refreshInterval: getRefreshInterval() });
+  const { data: tradesData, error: tradesError, isLoading: tradesLoading } = useSWR<Trade[]>("/api/trades", { refreshInterval: getRefreshInterval() });
+  const positions = positionsData ?? EMPTY_POSITIONS;
+  const trades = tradesData ?? EMPTY_TRADES;
   const openTrades = useMemo(() => trades.filter((t) => !t.exitDate), [trades]);
 
-  const { data: settings } = useSWR<{ vixLowThreshold: number }>("/api/settings");
+  const { data: settings, error: settingsError } = useSWR<{ vixLowThreshold: number }>("/api/settings");
 
   // Batch: Vontobel prices + intraday for all positions in a single request
   const allBatchIsins = useMemo(() => {
     const positionIds = positions.map((p) => p.certificateId);
     const tradeIsins = openTrades.map((t) => t.certificateId).filter((id) => /^[A-Z0-9]{12}$/.test(id));
-    return [...new Set([...positionIds, ...tradeIsins])];
+    return [...new Set([...positionIds, ...tradeIsins])].sort();
   }, [positions, openTrades]);
-  const { data: batchData } = useSWR<{
+  const { data: batchData, error: batchError } = useSWR<{
     prices: Record<string, VontobelPrice>;
     intraday: Record<string, IntradayPoint[]>;
   }>(
-    allBatchIsins.length > 0 ? ["vontobel-batch", ...allBatchIsins] : null,
-    async () => {
-      const isins = allBatchIsins.join(",");
-      try {
-        const res = await fetch(`/api/vontobel/batch?isins=${isins}`);
-        if (res.ok) return res.json();
-      } catch { /* noop */ }
-      return { prices: {}, intraday: {} };
-    },
+    allBatchIsins.length > 0 ? `/api/vontobel/batch?isins=${allBatchIsins.join(",")}` : null,
     { refreshInterval: getRefreshInterval() }
   );
   const positionPrices = useMemo(() => batchData?.prices ?? {}, [batchData?.prices]);
   const certIntraday = batchData?.intraday ?? {};
 
-  const loading = !vixData && !intraday;
+  const loading = (!vixData && vixLoading) || (!positionsData && positionsLoading) || (!tradesData && tradesLoading);
+  const unavailable = (!vixData && vixError) || (!positionsData && positionsError) || (!tradesData && tradesError);
+  const warnings = [
+    vixError && vixData && "VIX-Daten",
+    positionsError && positionsData && "Positionen",
+    tradesError && tradesData && "Trades",
+    (period === "1d" ? intradayError : historyError) && "Chartdaten",
+    batchError && "Zertifikatskurse",
+    settingsError && "Einstellungen",
+  ].filter(Boolean);
 
   // Precomputed P&L for all positions — avoids recalculating inside map() on every render
   // Must be declared before any early return to satisfy React's Rules of Hooks
@@ -215,11 +221,13 @@ export default function DashboardPage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await globalMutate(
+    try { await globalMutate(
       (key: unknown) => {
         if (typeof key === "string") {
           return key.startsWith("/api/vix/") ||
             key.startsWith("/api/positions") ||
+            key.startsWith("/api/trades") ||
+            key.startsWith("/api/vontobel/batch") ||
             key.startsWith("/api/alerts") ||
             key.startsWith("/api/settings");
         }
@@ -231,7 +239,7 @@ export default function DashboardPage() {
       undefined,
       { revalidate: true }
     );
-    setRefreshing(false);
+    } finally { setRefreshing(false); }
   };
 
   // Closing is a real broker execution: collect actual price/date in the editor.
@@ -266,6 +274,10 @@ export default function DashboardPage() {
 
   const zone = vix ? getVixZone(vix.price) : null;
 
+  if (unavailable) {
+    return <div role="alert" className="p-6 text-red-400">Dashboard-Daten konnten nicht geladen werden. Bitte prüfe deine Verbindung und lade die Seite erneut.</div>;
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -288,6 +300,7 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
+      {warnings.length > 0 && <p role="alert" className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">Aktualisierung fehlgeschlagen: {warnings.join(", ")}. Vorhandene Daten können veraltet sein.</p>}
 
       {/* ============ MOBILE LAYOUT (< lg) ============ */}
       <div className="lg:hidden space-y-3">
@@ -296,6 +309,8 @@ export default function DashboardPage() {
           <h1 className="text-xl font-bold text-white">Dashboard</h1>
           <button
             onClick={() => handleRefresh()}
+            aria-label="Dashboard aktualisieren"
+            disabled={refreshing}
             className="p-2 rounded-xl"
             style={{ background: "#1A1A22" }}
           >
@@ -905,8 +920,8 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-semibold text-white">Manuelle Handelssignale</CardTitle>
               <a href="/signals" className="text-xs font-medium text-[#B8E15A]">Signalbereich öffnen →</a>
             </CardHeader>
-            <p className="text-sm text-[#8B8FA8]">Kauf- und Verkaufssignale prüfen, beim Broker selbst ausführen und die tatsächliche Ausführung mit Kurs, Stückzahl, Gebühren und Datum bestätigen.</p>
-            <p className="mt-3 text-xs text-[#8B8FA8]">Überwachungsstatus, Zustellung und Ausführungshistorie stehen im geschützten Signalbereich.</p>
+            <p className="text-sm text-[#8B8FA8]">VIX-Niveaus, Handelssignale und erfasste Ausführungen ansehen. Ein selbst gekaufter Trade startet derzeit noch keine automatische Renditeüberwachung.</p>
+            
           </Card>
         </div>
       </div>

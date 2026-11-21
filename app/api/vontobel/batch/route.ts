@@ -16,7 +16,7 @@ import { memGet, memSet } from "@/lib/server-cache";
 
 const PRICE_TTL = 300_000; // 5 min — aligns with client refreshInterval
 const INTRADAY_TTL = 300_000;
-const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
+const CC = { "Cache-Control": "no-store" };
 const MAX_ISINS = 20;
 
 const FETCH_HEADERS = {
@@ -38,7 +38,7 @@ async function getPrice(isin: string): Promise<object> {
   try {
     const row = await prisma.vixCache.findUnique({ where: { id: key } });
     if (row && Date.now() - row.updatedAt.getTime() < PRICE_TTL) {
-      memSet(key, row.data as object, PRICE_TTL);
+      memSet(key, row.data as object, Math.max(1, PRICE_TTL - (Date.now() - row.updatedAt.getTime())));
       return row.data as object;
     }
   } catch { /* DB optional */ }

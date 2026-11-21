@@ -6,7 +6,7 @@ import { alertConfigSchema, normalizeAlertConfig, DEFAULT_ALERT_CONFIG } from "@
 
 const CACHE_KEY = "settings_data";
 const CACHE_TTL = 60_000; // 60s — settings rarely change
-const CC = { "Cache-Control": "s-maxage=60, stale-while-revalidate=120" };
+const CC = { "Cache-Control": "no-store" };
 
 const DEFAULT_SETTINGS = {
   id: 1,
@@ -63,7 +63,7 @@ export async function GET() {
     memSet(CACHE_KEY, payload, CACHE_TTL);
     return NextResponse.json(payload, { headers: CC });
   } catch {
-    return NextResponse.json(DEFAULT_SETTINGS);
+    return NextResponse.json({ error: "Einstellungen konnten nicht geladen werden" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }
 

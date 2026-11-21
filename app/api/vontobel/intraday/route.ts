@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getVontobelCertificateIntraday } from "@/lib/yahoo-finance";
 import { memGet, memSet } from "@/lib/server-cache";
 
-const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
+const CC = { "Cache-Control": "no-store" };
 
 export async function GET(req: NextRequest) {
   const isin = new URL(req.url).searchParams.get("isin");

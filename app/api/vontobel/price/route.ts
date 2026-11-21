@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { memGet, memSet } from "@/lib/server-cache";
 
 const CACHE_TTL = 300_000; // 5 min — aligns with client refreshInterval
-const CC = { "Cache-Control": "s-maxage=300, stale-while-revalidate=60" };
+const CC = { "Cache-Control": "no-store" };
 
 export async function GET(req: NextRequest) {
   const isin = req.nextUrl.searchParams.get("isin");

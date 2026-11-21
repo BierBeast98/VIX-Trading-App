@@ -1,4 +1,19 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const Module=require('node:module');const ts=require('typescript');
-function setup(){const rows=[],fetches=[];const prisma={$transaction:async fn=>fn({marketObservation:{createMany:async({data})=>{rows.push(...data);return {count:data.length}}},marketFetch:{create:async({data})=>fetches.push(data)}})};const normalize={quality:()=> 'delayed',sampleKey:(s,id)=>`${s.instrument}:${id}`,yahooSamples:()=>[],vontobelSamples:()=>[]};const m=new Module(__filename);m.require=n=>n==='@/lib/prisma'?{prisma}:n==='./normalize'?normalize:require(n);m._compile(ts.transpileModule(fs.readFileSync('lib/archive/capture.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,__filename);return {lib:m.exports,rows,fetches};}
+function setup(){const rows=[],fetches=[];const prisma={$transaction:async fn=>fn({marketObservation:{createMany:async({data})=>{rows.push(...data);return {count:data.length}}},marketFetch:{create:async({data})=>fetches.push(data)}})};const normalize={quality:()=> 'delayed',sampleKey:(s,id)=>`${s.instrument}:${id}`,yahooSamples:()=>[],vontobelSamples:()=>[]};const m=new Module(__filename);m.require=n=>n==='@/lib/prisma'?{prisma}:n==='./normalize'?normalize:require(n);m._compile(ts.transpileModule(fs.readFileSync('lib/archive/capture.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,__filename);return {lib:m.exports,rows,fetches,prisma};}
 test('collector records each VIX slot once by stable key and keeps timestamps',async()=>{const {lib,rows}=setup();const sample={source:'yahoo',instrument:'YAHOO:^VIX',kind:'index_quote',sourceAt:'2026-11-17T14:00:00Z',last:16};for(const slot of ['10','11','11'])await lib.withArchiveContext({origin:'collector',runId:slot,slot},()=>lib.persistFetch({id:crypto.randomUUID(),source:'yahoo',operation:'quote',instrument:sample.instrument,startedAt:new Date(),success:true,measurement:'sdk_call',samples:[sample]}));assert.equal(rows[0].key,'collector-vix:10');assert.equal(rows[1].key,'collector-vix:11');assert.equal(rows[2].key,rows[1].key);assert.equal(rows[0].metadata.archiveSlot,'10');assert.equal(rows[0].sourceAt.getTime(),Date.parse(sample.sourceAt));});
 test('only VIX observations retained while non-VIX fetch counts remain',async()=>{const {lib,rows,fetches}=setup();await lib.persistFetch({id:'x',source:'vontobel',operation:'page',instrument:'ISIN:X',startedAt:new Date(),success:true,measurement:'http_request',samples:[{source:'vontobel',instrument:'ISIN:X',kind:'certificate_quote',last:2}]});assert.equal(rows.length,0);assert.equal(fetches[0].returnedPoints,1);assert.equal(fetches[0].insertedPoints,0);});
+
+test('parallel archive work cannot erase or contaminate a collector persistence failure',async()=>{
+ const {lib,prisma}=setup();
+ prisma.$transaction=async fn=>fn({marketObservation:{createMany:async()=>({count:0})},marketFetch:{create:async({data})=>{if(data.id==='failed') throw new Error('database unavailable')}}});
+ const input=id=>({id,source:'yahoo',operation:'quote',instrument:'YAHOO:^VIX',startedAt:new Date(),success:true,measurement:'sdk_call',samples:[]});
+ let failureSeen,healthySeen;
+ const oldError=console.error;console.error=()=>{};
+ try {
+  await Promise.all([
+   lib.withArchiveContext({origin:'collector',runId:'one'},async()=>{await lib.persistFetch(input('failed'));await lib.persistFetch(input('success-in-same-run'));await new Promise(resolve=>setTimeout(resolve,15));failureSeen=lib.persistenceError();}),
+   lib.withArchiveContext({origin:'collector',runId:'two'},async()=>{await new Promise(resolve=>setTimeout(resolve,5));await lib.persistFetch(input('success'));healthySeen=lib.persistenceError();})
+  ]);
+ } finally {console.error=oldError;}
+ assert.ok(failureSeen);assert.equal(healthySeen,null);assert.equal(lib.persistenceError(),failureSeen);
+});

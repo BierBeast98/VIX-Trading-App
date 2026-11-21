@@ -2,11 +2,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { quality, sampleKey, yahooSamples, vontobelSamples, type Sample } from './normalize';
-type Context = { origin: string; runId?: string; slot?: string };
+type Context = { origin: string; runId?: string; slot?: string; persistenceFailure?: string | null };
 const context = new AsyncLocalStorage<Context>();
-export function withArchiveContext<T>(value: Context, fn: () => T): T { return context.run(value, fn); }
+export function withArchiveContext<T>(value: Context, fn: () => T): T { return context.run({ ...value, persistenceFailure: null }, fn); }
 let lastPersistenceError: string | null = null;
-export function persistenceError() { return lastPersistenceError; }
+export function persistenceError() { const active = context.getStore(); return active ? active.persistenceFailure ?? null : lastPersistenceError; }
 export async function persistFetch(input: { id: string; source: string; operation: string; instrument: string;
   startedAt: Date; success: boolean; measurement: string; httpStatus?: number; responseBytes?: number; errorCode?: string; samples: Sample[] }) {
   const finishedAt = new Date(), ctx = context.getStore();
@@ -24,9 +24,9 @@ export async function persistFetch(input: { id: string; source: string; operatio
         durationMs:Math.min(2147483647,Math.max(0,finishedAt.getTime()-input.startedAt.getTime())),success:input.success,
         httpStatus:input.httpStatus ?? null,responseBytes:input.responseBytes ?? null,returnedPoints:input.samples.length,insertedPoints:inserted,errorCode:input.errorCode ?? null}});
     },{timeout:20000});
-    lastPersistenceError = null;
   } catch {
     lastPersistenceError = new Date().toISOString();
+    if (ctx) ctx.persistenceFailure = lastPersistenceError;
     console.error('[market-archive] persistence failed; source result preserved');
   }
 }

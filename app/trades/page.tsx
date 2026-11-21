@@ -355,7 +355,7 @@ export default function TradesPage() {
 
   // Live prices for open trades
   const openIsins = useMemo(
-    () => [...new Set(trades.filter((t) => !t.exitDate).map((t) => t.certificateId))],
+    () => [...new Set(trades.filter((t) => !t.exitDate).map((t) => t.certificateId))].sort(),
     [trades]
   );
   const { data: batchData } = useSWR<{ prices: Record<string, { bid: number | null }> }>(
@@ -369,6 +369,7 @@ export default function TradesPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [expandedTrade, setExpandedTrade] = useState<string | null>(null);
   const [fetchingProduct, setFetchingProduct] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
@@ -384,7 +385,7 @@ export default function TradesPage() {
       if (!res.ok) throw new Error("Produkt nicht gefunden");
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setForm((f) => ({
+      setForm((f) => f.certificateId !== isin ? f : ({
         ...f,
         strikePrice: data.strikePrice != null ? String(data.strikePrice) : f.strikePrice,
         barrierLevel: data.barrierLevel != null ? String(data.barrierLevel) : f.barrierLevel,
@@ -513,9 +514,14 @@ export default function TradesPage() {
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm("Trade wirklich löschen?")) return;
     setDeleting(id);
-    const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
-    if (res.ok) await mutateTrades();
-    setDeleting(null);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/trades/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      await mutateTrades();
+    } catch {
+      setDeleteError("Trade konnte nicht gelöscht werden. Bitte erneut versuchen.");
+    } finally { setDeleting(null); }
   }, [mutateTrades]);
 
   const toggleExpanded = useCallback((id: string) => {
@@ -727,7 +733,8 @@ export default function TradesPage() {
       )}
 
       {metrics.invalidDateTrades > 0 && <p className="text-xs text-[#F59E0B]">{metrics.invalidDateTrades} Trade(s) mit Ausstieg vor Einstieg oder ungültigem Datum von Kennzahlen ausgeschlossen. Historische Einträge bleiben unverändert.</p>}
-      <p className="text-xs text-[#8B8FA8]">Historische Zertifikatsrenditen und realisierter G/V vor Gebühren. Kein berechneter Depotwert; Strategiekapital und Ausführungen unter Analytics / Signale.</p>
+      <p className="text-xs text-[#8B8FA8]">Zertifikatsrenditen und G/V vor Gebühren; kein Depotwert.</p>
+      {deleteError && <p role="alert" className="mb-4 text-sm text-red-400">{deleteError}</p>}
       {tradesError && <p className="text-sm text-[#F59E0B]">Trades konnten nicht geladen werden. Angezeigte ältere Werte können veraltet sein.</p>}
       {/* Summary Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">

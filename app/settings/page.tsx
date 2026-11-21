@@ -16,11 +16,12 @@ interface Settings {
 }
 
 export default function SettingsPage() {
-  const { data: serverSettings, isLoading: swrLoading } = useSWR<Settings>("/api/settings");
+  const { data: serverSettings, isLoading: swrLoading, error: settingsError } = useSWR<Settings>("/api/settings");
   const [settings, setSettings] = useState<Settings | null>(null);
   const loading = swrLoading && settings === null;
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [testingEmail, setTestingEmail] = useState(false);
   const [emailTestResult, setEmailTestResult] = useState<"success" | "error" | null>(null);
 
@@ -43,33 +44,36 @@ export default function SettingsPage() {
   const handleSave = async () => {
     if (!settings) return;
     setSaving(true);
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        alertEmail: settings.alertEmail,
-        vontobelIsin: settings.vontobelIsin,
-      }),
-    });
-    if (res.ok) {
+    setSaveError("");
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alertEmail: settings.alertEmail, vontobelIsin: settings.vontobelIsin }),
+      });
+      if (!res.ok) throw new Error("Einstellungen konnten nicht gespeichert werden.");
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    }
-    setSaving(false);
+    } catch {
+      setSaveError("Einstellungen konnten nicht gespeichert werden. Bitte erneut versuchen.");
+    } finally { setSaving(false); }
   };
 
   const testEmail = async () => {
     setTestingEmail(true);
     setEmailTestResult(null);
-    const res = await fetch("/api/alerts/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: settings?.alertEmail }),
-    });
-    const data = await res.json();
-    setEmailTestResult(data.success ? "success" : "error");
-    setTestingEmail(false);
+    try {
+      const res = await fetch("/api/alerts/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: settings?.alertEmail }),
+      });
+      const data = await res.json();
+      setEmailTestResult(res.ok && data.success ? "success" : "error");
+    } catch { setEmailTestResult("error"); }
+    finally { setTestingEmail(false); }
   };
+
+  if (settingsError && !settings) return <p role="alert" className="p-6 text-red-400">Einstellungen konnten nicht geladen werden. Bitte erneut laden.</p>;
 
   if (loading || !settings) {
     return (
@@ -95,6 +99,7 @@ export default function SettingsPage() {
         </Button>
       </div>
 
+      {saveError && <p role="alert" className="text-sm text-red-400">{saveError}</p>}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
         {/* Email Config */}
         <Card>
@@ -129,16 +134,7 @@ export default function SettingsPage() {
                 <Badge variant="danger">Fehler beim Senden</Badge>
               )}
             </div>
-            <div className="rounded-xl p-3 text-xs space-y-1" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-              <p style={{ color: "#8B8FA8" }}>
-                <strong className="text-white">Resend API Key</strong> muss in der Umgebungsvariable
-                <code className="mx-1 px-1 rounded" style={{ background: "#0C0C0F" }}>RESEND_API_KEY</code>
-                gesetzt sein.
-              </p>
-              <p style={{ color: "#8B8FA8" }}>
-                Absender-Domain muss in Resend verifiziert sein.
-              </p>
-            </div>
+
           </div>
         </Card>
 
@@ -151,9 +147,6 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
           <div className="space-y-3">
-            <p className="text-sm" style={{ color: "#8B8FA8" }}>
-              Konfiguration und Verlauf der manuellen Handelssignale findest du im Signalbereich.
-            </p>
             <Link
               href="/signals"
               className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
@@ -180,7 +173,7 @@ export default function SettingsPage() {
               value={settings.vontobelIsin}
               onChange={(e) => update("vontobelIsin", e.target.value.toUpperCase())}
               placeholder="DE000VJ4MNF2"
-              hint="ISIN eines VIX Mini Future von Vontobel — liefert echte VIX Future Intraday-Daten"
+              hint="Aktives Vontobel VIX Mini Future"
             />
             {settings.vontobelIsin && (
               <div className="flex items-center gap-3">
@@ -196,29 +189,18 @@ export default function SettingsPage() {
                 </a>
               </div>
             )}
-            <div className="rounded-xl p-3 text-xs space-y-1" style={{ background: "#1A1A22", border: "1px solid #1E1E28" }}>
-              <p style={{ color: "#8B8FA8" }}>
-                Die VIX Future Intraday-Daten (08:00–22:00 CET) werden über die
-                Chart-API dieses Zertifikats geladen. Falls das Zertifikat ausläuft
-                oder ausgeknockt wird, hier eine neue ISIN eines
-                aktiven VIX Mini Future eintragen.
-              </p>
-              <p className="pt-1" style={{ color: "#8B8FA8" }}>
-                Suche auf{" "}
-                <a
-                  href="https://markets.vontobel.com/de-de/produkte/hebel/mini-futures?underlyingGroup=52"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: "#B8E15A" }}
-                >
-                  Vontobel VIX Mini Futures
-                </a>
-                {" "}nach einem passenden Ersatz.
-              </p>
-            </div>
+
           </div>
         </Card>
       </div>
+      <details className="rounded-xl border border-[#1E1E28] bg-[#141418] p-4 text-sm text-[#8B8FA8]">
+        <summary className="cursor-pointer font-medium text-white">Hinweise zu E-Mail und Datenquellen</summary>
+        <div className="mt-3 space-y-2">
+          <p>Für E-Mail-Benachrichtigungen müssen der Resend-API-Schlüssel eingerichtet und die Absender-Domain verifiziert sein.</p>
+          <p>Die Intraday-Daten stammen aus der Chart-API des angegebenen Zertifikats. Bei Ablauf oder Knock-out eine neue ISIN für ein aktives VIX Mini Future eintragen.</p>
+          <a href="https://markets.vontobel.com/de-de/produkte/hebel/mini-futures?underlyingGroup=52" target="_blank" rel="noopener noreferrer" className="text-[#B8E15A]">Vontobel VIX Mini Futures suchen</a>
+        </div>
+      </details>
     </div>
   );
 }

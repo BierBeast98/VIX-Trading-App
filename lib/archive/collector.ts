@@ -18,12 +18,13 @@ export async function collectMarketData(){
  }
  if(!claimed)return {collected:false,reason:'collection_in_progress'};
  try{
-  await withArchiveContext({origin:'collector',runId,slot},async()=>{
+  const captureFailure = await withArchiveContext({origin:'collector',runId,slot},async()=>{
    await getVixSpot({ allowRealtime: false });
+   return persistenceError();
   });
   const [calls,failed]=await Promise.all([prisma.marketFetch.count({where:{runId}}),prisma.marketFetch.count({where:{runId,OR:[{success:false},{errorCode:{not:null}}]}})]);
   const expected=1;
-  const status=calls<expected||persistenceError()?'failed':failed?'partial':'completed';
+  const status=calls<expected||captureFailure?'failed':failed?'partial':'completed';
   await prisma.marketCollectionRun.update({where:{id:runId},data:{status,finishedAt:new Date(),errorCode:status==='failed'?'capture_incomplete':null}});
   return {collected:true,status,calls,failed};
  }catch{await prisma.marketCollectionRun.update({where:{id:runId},data:{status:'failed',finishedAt:new Date(),errorCode:'collection_error'}});throw new Error('Datensammlung fehlgeschlagen');}

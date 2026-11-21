@@ -1,3 +1,4 @@
+import { freshBid } from '@/lib/alert-quote';
 import { runSignalsCheck } from '@/lib/signals/service';
 import { cronAllowed } from '@/lib/signals/auth';
 import { NextRequest, NextResponse } from "next/server";
@@ -85,9 +86,8 @@ export async function GET(req: NextRequest) {
           where: { id: { in: positions.map((p) => `vontobel_${p.certificateId}`) } },
         });
         for (const row of rows) {
-          const bid = (row.data as { bid?: number | null }).bid ?? null;
-          const fresh = now - row.updatedAt.getTime() <= STALE_MS;
-          bidByCert.set(row.id.replace(/^vontobel_/, ""), { bid, fresh });
+          const bid = freshBid(row.data, now, STALE_MS);
+          bidByCert.set(row.id.replace(/^vontobel_/, ""), { bid, fresh: bid !== null });
         }
       } catch (e) {
         console.error("[alerts/check] bid cache read:", e);

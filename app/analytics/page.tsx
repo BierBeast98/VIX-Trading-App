@@ -171,11 +171,7 @@ export default function AnalyticsPage() {
               <CardHeader>
                 <CardTitle className="text-sm font-semibold text-white">Historisches Spot-Modell (1 Jahr)</CardTitle>
               </CardHeader>
-              <p className="text-xs mb-4" style={{ color: "#8B8FA8" }}>
-                {btDirection === "short"
-                  ? `Einstieg wenn VIX ≥ Einstiegsniveau (Short). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Vereinfachtes VIX-Spot-Modell mit konstantem Hebel; keine Simulation der Signalstrategie, echter VX-Kontrakte, Zertifikate, Gebühren oder Intraday-Knock-outs.`
-                  : `Einstieg wenn VIX ≤ Einstiegsniveau (Long). Ausstieg per Trailing Stop (ab Mindestrendite, Schritt = ${btStepPct}%) oder nach max. Haltetagen. Vereinfachtes VIX-Spot-Modell mit konstantem Hebel; keine Simulation der Signalstrategie, echter VX-Kontrakte, Zertifikate, Gebühren oder Intraday-Knock-outs.`}
-              </p>
+              <p className="mb-4 text-xs text-[#8B8FA8]">Vereinfachtes VIX-Spot-Modell mit konstantem Hebel: keine Signalstrategie, echten VX-Kontrakte, Zertifikate, Gebühren oder Intraday-Knock-outs.</p>
               <div className="space-y-3">
                 {/* Direction Toggle */}
                 <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: "#1E1E28" }}>
@@ -358,9 +354,8 @@ export default function AnalyticsPage() {
 
             <Card>
               <CardHeader><CardTitle className="text-sm font-semibold text-white">Bestätigte Kaufkaskade</CardTitle></CardHeader>
-              <p className="text-sm text-[#8B8FA8]">Die manuelle Strategie verwendet insgesamt 30 %, 40 % und 50 % der Kapitalbasis der aktuellen oder nächsten Runde einschließlich Gebühren. Weitere Käufe ergänzen nur die Differenz.</p>
+              <p className="text-xs text-[#8B8FA8]">Anteile inklusive Gebühren; weitere Käufe ergänzen die Differenz.</p>
               <div className="mt-4 space-y-2 text-white">{[30, 40, 50].map(pct => <div key={pct}>{pct} % kumuliert: {capitalData?.allocationCapital != null ? fmtEur(capitalData.allocationCapital * pct / 100) : "—"}</div>)}</div>
-              <p className="mt-3 text-xs text-[#8B8FA8]">Verbindliche Signale und tatsächliche Ausführungen im Signalbereich prüfen.</p>
               <a href="/signals" className="inline-block mt-3 text-sm text-[#B8E15A]">Zu den Handelssignalen →</a>
             </Card>
           </div>
