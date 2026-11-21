@@ -24,7 +24,7 @@ export type Signal = { id: string; roundId: string | null; side: 'buy' | 'sell';
 export type Execution = { id: string; signalId: string; side: 'buy' | 'sell'; isin: string;
   quantity: number; price: number; fees: number; at: string; note: string };
 export type State = { version: 1; config: Config; round: Round | null; signals: Signal[];
-  executions: Execution[]; armed: boolean; previousVix: number | null; previousVixAt: string | null;
+  levels?: import('./levels').LevelState; executions: Execution[]; armed: boolean; previousVix: number | null; previousVixAt: string | null;
   checkedAt: string | null; health: string; quote: Quote | null };
 export const defaults: Config = { enabled: false, capital: 10000, variant: 'C', leverage: 2.3, vixEntryPolicy: 'realtime',
   isin: '', wkn: '', futureSymbol: '', futureName: '', futureExpiry: '', productVerified: false,

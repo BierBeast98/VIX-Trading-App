@@ -1,3 +1,5 @@
+import { evaluateLevels } from './levels';
+import { deliverLevels } from './level-notify';
 import { withArchiveContext } from '@/lib/archive/capture';
 import { readState, changeState } from './store';
 import { evaluate, marketOpen } from './engine';
@@ -12,6 +14,7 @@ export async function runSignalsCheck() {
   }
   const quote = await withArchiveContext({ origin: 'signals' }, () => loadQuote(before.round?.config ?? before.config));
   const result = await changeState(async (state, tx) => {
+    evaluateLevels(state, quote, new Date());
     // Reject drift through legacy/manual DB edits before calculating from stale inventory.
     if (state.round) {
       for (const lot of state.round.lots.filter(l => l.quantity > 0 && l.tradeId)) {
@@ -26,6 +29,7 @@ export async function runSignalsCheck() {
     const next = evaluate(state, quote, new Date());
     return { state: next, result: { checked: true, managed: true, message: next.health } };
   });
+  await deliverLevels();
   await deliverSignals();
   return result;
 }
