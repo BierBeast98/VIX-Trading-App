@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getVixSpot } from '@/lib/yahoo-finance';
-import { trackedVontobel, withArchiveContext, persistenceError } from './capture';
+import { withArchiveContext, persistenceError } from './capture';
 import { archiveConfig, collectingNow } from './config';
 export async function collectMarketData(){
  const config=await archiveConfig(),now=new Date();
@@ -18,16 +18,11 @@ export async function collectMarketData(){
  }
  if(!claimed)return {collected:false,reason:'collection_in_progress'};
  try{
-  await withArchiveContext({origin:'collector',runId},async()=>{
-   const tasks:Promise<unknown>[]=[getVixSpot()];
-   for(const isin of config.isins.slice(0,10)){
-    tasks.push(trackedVontobel(`https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${isin}`,{cache:'no-store',signal:AbortSignal.timeout(12000)}));
-    tasks.push(trackedVontobel(`https://markets.vontobel.com/api/v1/charts/products/${isin}/detail/0?c=de-de`,{cache:'no-store',signal:AbortSignal.timeout(12000)}));
-   }
-   await Promise.allSettled(tasks);
+  await withArchiveContext({origin:'collector',runId,slot},async()=>{
+   await getVixSpot({ allowRealtime: false });
   });
   const [calls,failed]=await Promise.all([prisma.marketFetch.count({where:{runId}}),prisma.marketFetch.count({where:{runId,OR:[{success:false},{errorCode:{not:null}}]}})]);
-  const expected=1+config.isins.slice(0,10).length*2;
+  const expected=1;
   const status=calls<expected||persistenceError()?'failed':failed?'partial':'completed';
   await prisma.marketCollectionRun.update({where:{id:runId},data:{status,finishedAt:new Date(),errorCode:status==='failed'?'capture_incomplete':null}});
   return {collected:true,status,calls,failed};

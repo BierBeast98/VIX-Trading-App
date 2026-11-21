@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { quality, sampleKey, yahooSamples, vontobelSamples, type Sample } from './normalize';
-type Context = { origin: string; runId?: string };
+type Context = { origin: string; runId?: string; slot?: string };
 const context = new AsyncLocalStorage<Context>();
 export function withArchiveContext<T>(value: Context, fn: () => T): T { return context.run(value, fn); }
 let lastPersistenceError: string | null = null;
@@ -12,16 +12,17 @@ export async function persistFetch(input: { id: string; source: string; operatio
   const finishedAt = new Date(), ctx = context.getStore();
   try {
     await prisma.$transaction(async tx => {
-      const rows = input.samples.map(s => ({ key: sampleKey(s,input.id),fetchId:input.id,source:s.source,instrument:s.instrument,kind:s.kind,
+      // Persist new VIX observations only; request statistics remain available for all sources.
+      const rows = input.samples.filter(s => s.instrument === 'YAHOO:^VIX' || s.instrument === 'MASSIVE:I:VIX').map(s => ({ key: ctx?.origin === 'collector' && ctx.slot && s.instrument === 'YAHOO:^VIX' && s.kind === 'index_quote' ? `collector-vix:${ctx.slot}` : sampleKey(s,input.id),fetchId:input.id,source:s.source,instrument:s.instrument,kind:s.kind,
         currency:s.currency ?? null,isin:s.isin ?? null,contract:s.contract ?? null,sourceAt:s.sourceAt ? new Date(s.sourceAt) : null,
         receivedAt:finishedAt,quality:quality(s,finishedAt),last:s.last ?? null,bid:s.bid ?? null,ask:s.ask ?? null,
         open:s.open ?? null,high:s.high ?? null,low:s.low ?? null,close:s.close ?? null,volume:s.volume ?? null,
-        metadata:(s.metadata ?? {}) as Prisma.InputJsonValue }));
+        metadata:({ ...s.metadata, ...(ctx?.origin === 'collector' && ctx.slot ? { archiveSlot: ctx.slot } : {}) }) as Prisma.InputJsonValue }));
       const inserted = rows.length ? (await tx.marketObservation.createMany({data:rows,skipDuplicates:true})).count : 0;
       await tx.marketFetch.create({data:{id:input.id,runId:ctx?.runId ?? null,source:input.source,operation:input.operation,instrument:input.instrument,
         origin:ctx?.origin ?? 'app',measurement:input.measurement,startedAt:input.startedAt,finishedAt,
         durationMs:Math.min(2147483647,Math.max(0,finishedAt.getTime()-input.startedAt.getTime())),success:input.success,
-        httpStatus:input.httpStatus ?? null,responseBytes:input.responseBytes ?? null,returnedPoints:rows.length,insertedPoints:inserted,errorCode:input.errorCode ?? null}});
+        httpStatus:input.httpStatus ?? null,responseBytes:input.responseBytes ?? null,returnedPoints:input.samples.length,insertedPoints:inserted,errorCode:input.errorCode ?? null}});
     },{timeout:20000});
     lastPersistenceError = null;
   } catch {
