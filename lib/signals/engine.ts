@@ -1,5 +1,6 @@
 /** Deterministic long strategy. No network, DB, clock or broker side effects. */
 export const DEFAULT_VIX_LEVELS = [15.5, 14.5, 13.5] as const;
+export const DEFAULT_ENTRY_LEVELS = [16, 15, 14] as const;
 export const ENTRY_TARGETS = [30, 40, 50] as const;
 export type VixLevels = [number, number, number];
 export type Config = {
@@ -10,7 +11,8 @@ export type Config = {
   productVerified: boolean; barrier: number; email: boolean; telegram: boolean;
   broker: string; opensAt: string; closesAt: string; closedDates: string[];
 };
-export const entryLevels = (config: Pick<Config, 'entryLevels'>) => config.entryLevels ?? DEFAULT_VIX_LEVELS;
+export const entryLevels = (config: Pick<Config, 'entryLevels' | 'variant'>) =>
+  config.entryLevels ?? (config.variant === 'C' ? DEFAULT_ENTRY_LEVELS : DEFAULT_VIX_LEVELS);
 export const notificationLevels = (config: Pick<Config, 'notificationLevels'>) => config.notificationLevels ?? DEFAULT_VIX_LEVELS;
 export type IssuerStatus = 'active' | 'inactive' | 'unavailable' | 'mismatch';
 export type Quote = { isin: string; at: string; vix: number | null; vixAt: string | null; vixRealtime?: boolean; vixSource?: string; vixFeedMode?: 'realtime' | 'delayed' | 'unknown'; vixFeedError?: string;
@@ -19,9 +21,10 @@ export type Quote = { isin: string; at: string; vix: number | null; vixAt: strin
 export type Lot = { id: string; quantity: number; originalQuantity: number; cost: number;
   entryPrice: number; fees: number; enteredAt: string; tradeId?: string; positionId?: string };
 export type Round = { id: string; capital: number; spent: number; realized: number; taxWithheld?: number; startedAt: string;
-  stage: number; reduced: boolean; day10Checked: boolean; trailing: boolean; peakFactor: number; floorFactor: number;
+  stage: number; reduced: boolean; day10Checked: boolean; reviewPeriod?: number; trailing: boolean; peakFactor: number; floorFactor: number;
   lots: Lot[]; config: Config };
 export type Signal = { id: string; roundId: string | null; side: 'buy' | 'sell'; reason: string;
+  sellKind?: 'trailing' | 'partial' | 'remaining' | 'loss';
   isin: string; at: string; expiresAt: string; settlement?: boolean; status: 'pending' | 'executed' | 'skipped' | 'expired' | 'superseded';
   budget: number; targetPct: number; stage: number; price: number; quantity: number;
   allocations: { lotId: string; quantity: number }[]; capital: number; vix: number | null;
@@ -33,7 +36,7 @@ export type Execution = { id: string; signalId: string; side: 'buy' | 'sell'; is
 export type State = { version: 1; config: Config; round: Round | null; signals: Signal[];
   levels?: import('./levels').LevelState; executions: Execution[]; armed: boolean; previousVix: number | null; previousVixAt: string | null;
   checkedAt: string | null; health: string; quote: Quote | null };
-export const defaults: Config = { enabled: false, capital: 10000, variant: 'C', leverage: 2.3, vixEntryPolicy: 'realtime',
+export const defaults: Config = { enabled: false, capital: 10000, variant: 'C', leverage: 2, vixEntryPolicy: 'realtime',
   isin: '', wkn: '', futureSymbol: '', futureName: '', futureExpiry: '', productVerified: false,
   barrier: 0, email: true, telegram: true, broker: '', opensAt: '', closesAt: '', closedDates: [] };
 export const initialState = (): State => ({ version: 1, config: { ...defaults }, round: null,
@@ -47,6 +50,44 @@ const marketTime = new Intl.DateTimeFormat('en-CA', {
 const marketDay = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
 });
+const heldDays = (r: Round, now: Date) =>
+  (Date.parse(marketDay.format(now)) - Date.parse(marketDay.format(new Date(r.startedAt)))) / 86_400_000;
+const asReturn = (factor: number) =>
+  (factor - 1).toLocaleString('de-DE', { style: 'percent', maximumFractionDigits: 2, signDisplay: 'exceptZero' });
+
+function halfPosition(lots: Lot[]): Signal['allocations'] {
+  const allocations = lots.filter(lot => lot.quantity > 0).map(lot =>
+    ({ lotId: lot.id, quantity: Math.floor(lot.quantity / 2), odd: lot.quantity % 2 }));
+  let extras = Math.floor(allocations.reduce((sum, lot) => sum + lot.odd, 0) / 2);
+  for (const lot of allocations) {
+    if (extras > 0 && lot.odd) { lot.quantity++; extras--; }
+  }
+  return allocations.filter(lot => lot.quantity > 0).map(({ lotId, quantity }) => ({ lotId, quantity }));
+}
+
+function reviewExit(r: Round, factor: number, days: number): { kind: NonNullable<Signal['sellKind']>; reason: string } | null {
+  const period = Math.floor(days / 15);
+  const due = period > r.reviewPeriod!;
+  if (due) r.reviewPeriod = period;
+  if (factor + 1e-12 >= 1.30) r.trailing = true;
+  if (r.trailing) {
+    r.peakFactor = Math.max(r.peakFactor, factor);
+    r.floorFactor = r.peakFactor - .05;
+  }
+  const performance = asReturn(factor);
+  if (factor <= .65 + 1e-12) return { kind: 'loss', reason: `Verlustgrenze −35 % erreicht · offene Position ${performance}` };
+  if (r.trailing && factor <= r.floorFactor + 1e-12) {
+    return { kind: 'trailing', reason: `Trailing · Hoch ${asReturn(r.peakFactor)} · Schwelle ${asReturn(r.floorFactor)} · Rendite ${performance}` };
+  }
+  if (!due || r.trailing) return null;
+  if (!r.reduced && factor <= .90 + 1e-12) {
+    return { kind: 'partial', reason: `Teilverkauf 50 % · Prüfung ab Tag ${15 * period} · offene Position ${performance} · Schwelle −10 %` };
+  }
+  if (r.reduced && factor <= .80 + 1e-12) {
+    return { kind: 'remaining', reason: `Restverkauf · Prüfung ab Tag ${15 * period} · Restposition ${performance} · Schwelle −20 %` };
+  }
+  return null;
+}
 export function futureDaysLeft(config: Pick<Config, 'futureExpiry'>, now: Date): number | null {
   const expiry = Date.parse(config.futureExpiry + 'T00:00:00Z');
   return Number.isFinite(expiry) ? (expiry - now.getTime()) / 86_400_000 : null;
@@ -114,7 +155,9 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
       : 'Prüfprodukt inaktiv. Für neue Kaufsignale ein anderes Produkt prüfen.';
     return s;
   }
-  const [first, second, third] = entryLevels(cfg);
+  const reviewRules = cfg.variant === 'C' && (!s.round || s.round.reviewPeriod != null);
+  const [first, second, third] = cfg.variant === 'C' && !reviewRules
+    ? cfg.entryLevels ?? DEFAULT_VIX_LEVELS : entryLevels(cfg);
   const goodSpot = entryVixUsable(cfg, quote, now);
   const goodBid = positive(quote.bid) && fresh(quote.productAt, now);
   const previous = s.previousVix;
@@ -124,13 +167,13 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
   const consecutive = newSpot && previousAt !== null && Date.parse(quote.vixAt!) - Date.parse(previousAt) <= 10 * MINUTE;
   if (newSpot) { s.previousVix = quote.vix; s.previousVixAt = quote.vixAt; if (quote.vix! >= first) s.armed = true; }
   const pending = s.signals.find(x => x.status === 'pending');
-  const add = (side: 'buy' | 'sell', reason: string, stage: number, budget: number, targetPct: number, allocations: Signal['allocations'] = []) => {
+  const add = (side: 'buy' | 'sell', reason: string, stage: number, budget: number, targetPct: number, allocations: Signal['allocations'] = [], sellKind?: Signal['sellKind']) => {
     const price = side === 'buy' ? quote.ask! : quote.bid!;
     const quantity = side === 'buy' ? Math.floor(budget / price) : allocations.reduce((n, a) => n + a.quantity, 0);
     if (quantity <= 0) { s.health = 'Betrag reicht nicht für ein ganzes Stück'; return false; }
     s.signals.unshift({ id: crypto.randomUUID(), roundId: s.round?.id ?? null, side, reason,
       isin: cfg.isin, at: now.toISOString(), expiresAt: new Date(now.getTime() + 5 * MINUTE).toISOString(),
-      status: 'pending', budget, targetPct, stage, price, quantity, allocations,
+      status: 'pending', budget, targetPct, stage, price, quantity, allocations, ...(sellKind && { sellKind }),
       capital: s.round?.capital ?? cfg.capital, vix: goodSpot ? quote.vix : null,
       vixAt: quote.vixAt, vixSource: quote.vixSource, vixFeedMode: quote.vixFeedMode,
       vixAgeMinutes: quote.vixAt && Number.isFinite(Date.parse(quote.vixAt)) ? (now.getTime() - Date.parse(quote.vixAt)) / MINUTE : null,
@@ -141,29 +184,35 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
     const r = s.round;
     if (!goodBid) { s.health = 'Verkaufsprüfung blockiert: kein frischer Geldkurs'; return s; }
     const m = roundMetrics(r, quote.bid!);
-    if (m.factor >= 1.1) r.trailing = true;
-    if (r.trailing) {
+    if (!reviewRules && m.factor >= 1.1) r.trailing = true;
+    if (!reviewRules && r.trailing) {
       r.peakFactor = Math.max(r.peakFactor, m.factor);
       const gap = r.peakFactor >= 1.35 ? .05 : r.peakFactor >= 1.2 ? .06 : .08;
       r.floorFactor = Math.max(r.floorFactor, r.peakFactor * (1 - gap));
     }
     // Calendar days in Berlin, including DST changes.
-    const day = (d: Date) => Date.parse(marketDay.format(d));
-    const days = (day(now) - day(new Date(r.startedAt))) / 86400000;
-    const checkReduction = cfg.variant !== 'A' && days >= 10 && !r.day10Checked;
+    const days = heldDays(r, now);
+    const checkReduction = !reviewRules && cfg.variant !== 'A' && days >= 10 && !r.day10Checked;
     if (checkReduction) r.day10Checked = true;
     let reason = ''; let partial = false;
-    if (cfg.variant === 'C' && m.pnl <= -.06 * r.capital) reason = 'Rundenverlustlimit −6 % erreicht';
+    const exit = reviewRules ? reviewExit(r, m.factor, days) : null;
+    if (reviewRules) { reason = exit?.reason ?? ''; partial = exit?.kind === 'partial'; }
+    else if (cfg.variant === 'C' && m.pnl <= -.06 * r.capital) reason = 'Rundenverlustlimit −6 % erreicht';
     else if (m.factor <= .6) reason = 'Positionsverlustgrenze −40 % erreicht';
     else if (r.trailing && m.factor < r.floorFactor) reason = 'Trailing-Barriere unterschritten';
     else if (cfg.variant === 'A' && days >= 10) reason = 'Zeitverkauf nach zehn Kalendertagen';
     else if (cfg.variant !== 'A' && days >= 20 && !r.trailing) reason = 'Restposition nach 20 Kalendertagen schließen';
     else if (checkReduction && !r.reduced && !r.trailing && m.factor <= 1) { reason = '80-%-Reduktion ab Tag zehn'; partial = true; }
     if (reason) {
-      if (pending?.side === 'sell' && (!partial && pending.reason.includes('80-%'))) pending.status = 'superseded';
+      const allocations = partial && reviewRules ? halfPosition(r.lots)
+        : r.lots.filter(l => l.quantity > 0).map(l => ({ lotId: l.id, quantity: partial ? Math.max(1, Math.floor(l.quantity * .8)) : l.quantity }));
+      if (!allocations.length) { s.health = 'Für einen Teilverkauf ist mehr als ein Stück erforderlich'; return s; }
+      const escalate = !partial && (pending?.sellKind === 'partial' || pending?.reason.includes('80-%')
+        || (exit?.kind === 'loss' && pending?.sellKind !== 'loss'));
+      if (pending?.side === 'sell' && escalate) pending.status = 'superseded';
       else if (pending?.side === 'sell') { s.health = 'Verkaufssignal wartet auf Ausführungsbestätigung'; return s; }
       if (pending?.side === 'buy') pending.status = 'superseded';
-      add('sell', reason, r.stage, 0, 0, r.lots.filter(l => l.quantity > 0).map(l => ({ lotId: l.id, quantity: partial ? Math.max(1, Math.floor(l.quantity * .8)) : l.quantity })));
+      add('sell', reason, r.stage, 0, 0, allocations, exit?.kind);
       s.health = 'Verkaufssignal erstellt'; return s;
     }
     if (pending) { s.health = 'Offenes Signal wartet auf Bestätigung'; return s; }
@@ -186,17 +235,22 @@ export function evaluate(state: State, quote: Quote, now: Date): State {
   if (!consecutive || previous === null) { s.health = 'Warte auf beobachtete Abwärtskreuzung mit freigegebenen VIX-Quelldaten'; return s; }
   let stage = 0;
   if (!s.round) {
-    if (s.armed && previous >= first && quote.vix! < first) stage = quote.vix! <= third ? 3 : quote.vix! <= second ? 2 : 1;
+    if (s.armed && previous >= first && quote.vix! < first) {
+      const crossed = (threshold: number) => reviewRules ? quote.vix! < threshold : quote.vix! <= threshold;
+      stage = crossed(third) ? 3 : crossed(second) ? 2 : 1;
+    }
   } else {
-    if (previous > second && quote.vix! <= second && s.round.stage < 2) stage = 2;
-    if (previous > third && quote.vix! <= third && s.round.stage < 3) stage = 3;
+    const crossed = (threshold: number) => reviewRules
+      ? previous >= threshold && quote.vix! < threshold : previous > threshold && quote.vix! <= threshold;
+    if (crossed(second) && s.round.stage < 2) stage = 2;
+    if (crossed(third) && s.round.stage < 3) stage = 3;
   }
   if (stage) {
     const pct = ENTRY_TARGETS[stage - 1];
     const capital = s.round?.capital ?? cfg.capital;
     const budget = Math.max(0, capital * pct / 100 - (s.round?.spent ?? 0));
-    const reason = s.round ? 'Nachkauf: neue Abwärtskreuzung'
-      : `Einstieg: VIX unterschreitet ${first.toLocaleString('de-DE')}`;
+    const threshold = [first, second, third][stage - 1];
+    const reason = `${s.round ? 'Nachkauf' : 'Einstieg'}: VIX unterschreitet ${threshold.toLocaleString('de-DE')} · VIX ${quote.vix!.toLocaleString('de-DE', { maximumFractionDigits: 3 })}`;
     if (add('buy', reason, stage, budget, pct)) s.health = 'Kaufsignal erstellt';
   } else s.health = 'Überwachung aktiv; kein neues Signal';
   return s;
@@ -258,7 +312,7 @@ export function confirm(state: State, fill: Fill, now: Date): State {
     if (signal.isin !== (s.round?.config.isin ?? s.config.isin)) throw new Error('Produkt wurde seit dem Signal geändert; vor Erfassung abgleichen');
     if (!s.round) s.round = { id: crypto.randomUUID(), capital: signal.capital, spent: 0, realized: 0,
       startedAt: at, stage: 0, reduced: false, day10Checked: false, trailing: false, peakFactor: 1, floorFactor: 0,
-      lots: [], config: { ...s.config } };
+      lots: [], config: { ...s.config }, ...(s.config.variant === 'C' && { reviewPeriod: 0 }) };
     const cost = quantity! * price! + fees;
     s.round.lots.push({ id: crypto.randomUUID(), quantity: quantity!, originalQuantity: quantity!, cost, entryPrice: price!, fees, enteredAt: at });
     s.round.spent += cost; s.round.stage = Math.max(s.round.stage, signal.stage); s.armed = false;
@@ -283,6 +337,7 @@ export function confirm(state: State, fill: Fill, now: Date): State {
       lot.quantity -= a.sell; lot.cost -= allocatedCost;
     }
     r.reduced = true;
+    if (r.reviewPeriod != null) r.reviewPeriod = Math.max(r.reviewPeriod, Math.floor(heldDays(r, new Date(at)) / 15));
     if (taxWithheld != null) r.taxWithheld = (r.taxWithheld ?? 0) + taxWithheld;
     for (const other of s.signals) if (other.id !== signal.id && other.status === 'pending') other.status = 'superseded';
     if (r.lots.every(l => l.quantity === 0)) {

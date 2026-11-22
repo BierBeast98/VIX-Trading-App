@@ -3,8 +3,9 @@ import { Resend } from 'resend';
 import { readState, changeState } from './store';
 import { marketOpen, fresh, entryVixUsable, type Signal, type State } from './engine';
 const eur = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
-export function signalText(s: Signal, reminder = false) {
-  return [reminder ? 'Erinnerung: Ausführung noch nicht erfasst' : (s.side === 'buy' ? 'KAUFSIGNAL' : 'VERKAUFSSIGNAL'),
+export function signalText(s: Signal, reminder = false, test = false) {
+  const heading = s.side === 'buy' ? 'KAUFSIGNAL' : 'VERKAUFSSIGNAL';
+  return [test ? `TEST · ${heading}` : reminder ? 'Erinnerung: Ausführung noch nicht erfasst' : heading,
     s.reason, `ISIN: ${s.isin}`, `Rundenbudget: ${eur(s.capital)}`,
     s.side === 'buy' ? `Zielquote: ${s.targetPct} % · zusätzlicher Betrag bis ${eur(s.budget)} inkl. Gebühren` : 'Verkauf der angegebenen Stückzahl',
     `${s.quantity} Stück · ${s.side === 'buy' ? 'Briefkurs' : 'Geldkurs'} bei Signal: ${eur(s.price)}`,
@@ -12,8 +13,8 @@ export function signalText(s: Signal, reminder = false) {
     s.side === 'buy' && s.vixFeedMode === 'delayed' ? 'VIX-Einstiegsbasis ist zeitversetzt; der aktuelle Zertifikatskurs kann bereits auf Marktbewegungen reagiert haben.' : '',
     `Vontobel-Kurszeit: ${new Date(s.quoteAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}`,
     s.side === 'buy' ? `Kaufsignal gültig bis ${new Date(s.expiresAt).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' })}; Gebühren bei Stückzahl berücksichtigen.` : 'Verkaufssignal bleibt bis zur Bestätigung offen. Aktuellen Kurs vor der Order prüfen.',
-    'Order selbst beim Broker aufgeben. Danach Screenshot senden oder Ausführung in der App erfassen.',
-    process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/signals#${s.id}` : '',
+    test ? 'Fiktives Szenario. Keine Order aufgeben.' : 'Order selbst beim Broker aufgeben. Danach Screenshot senden oder Ausführung in der App erfassen.',
+    process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/signals${test ? '' : '#' + s.id}` : '',
   ].filter(Boolean).join('\n');
 }
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;

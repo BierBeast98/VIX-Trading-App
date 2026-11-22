@@ -5,11 +5,13 @@ import { BellRing, Check, ChevronDown, RefreshCw, ShieldCheck } from 'lucide-rea
 import { Input, Select, Textarea } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
-  entryLevels, notificationLevels, ENTRY_TARGETS, futureDaysLeft, roundMetrics, marketOpen,
+  entryLevels, notificationLevels, ENTRY_TARGETS, DEFAULT_VIX_LEVELS, futureDaysLeft, roundMetrics, marketOpen,
   type State, type Config, type Signal, type Round, type VixLevels,
 } from '@/lib/signals/engine';
+import { telegramTestLabels, type TelegramTest } from '@/lib/signals/telegram-tests';
 type Payload = State & { dataFeed?: { provider: string; keyConfigured: boolean; entryPolicy?: 'realtime' | 'delayed20'; maxVixAgeMinutes?: number; productMaxAgeMinutes?: number }; capitalManaged?: boolean; channels: { email: boolean; telegram: boolean; links: boolean }; error?: string; configured?: boolean };
 const euro = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+const percentage = (n: number) => n.toLocaleString('de-DE', { style: 'percent', maximumFractionDigits: 2, signDisplay: 'exceptZero' });
 const time = (s: string) => new Date(s).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' });
 const panel = 'rounded-2xl border border-[#1E1E28] bg-[#141418] p-5';
 async function request(url: string, method: string, body?: unknown) {
@@ -75,7 +77,7 @@ const reduction = 'Ohne aktives Trailing 80 % ab Tag 10 bei ≤ 0 % reduzieren u
 const variants = {
   A: 'Zeitverkauf nach 10 Tagen',
   B: reduction,
-  C: `${reduction}. Rundenverlustlimit −6 %`,
+  C: 'Ohne aktives Trailing alle 15 Kalendertage prüfen. Bei ≤ −10 % einmalig 50 % verkaufen, bei einer späteren Prüfung den Rest bei ≤ −20 % verkaufen',
 };
 
 function LevelInputs({ config, field, disabled, onChange }: {
@@ -144,8 +146,13 @@ function StrategySettings({ saved, locked, capitalManaged, channels, onSaved }: 
         <LevelInputs config={config} field="notificationLevels" onChange={levels => set('notificationLevels', levels)} />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Input label="Strategiekapital in EUR" type="number" min="1" step="any" disabled={locked || !!capitalManaged} value={config.capital} onChange={e => set('capital', Number(e.target.value))} />
-          <Select label="Ausstiegsvariante" disabled={locked} value={config.variant} onChange={e => set('variant', e.target.value as Config['variant'])} options={[{ value: 'A', label: 'A · Zeitverkauf' }, { value: 'B', label: 'B · Reduktion und Restverkauf' }, { value: 'C', label: 'C · B plus 6-%-Rundenlimit' }]} />
-          <Select label="Geplanter Einstiegshebel" disabled={locked} value={config.leverage} onChange={e => set('leverage', Number(e.target.value))} options={[1.5, 1.9, 2, 2.3].map(n => ({ value: String(n), label: levelLabel(n) }))} />
+          <Select label="Ausstiegsvariante" disabled={locked} value={config.variant} onChange={e => {
+            const variant = e.target.value as Config['variant'];
+            setDraft(variant === 'C' && config.leverage !== 2
+              ? { ...config, variant, leverage: 2, productVerified: false }
+              : { ...config, variant });
+          }} options={[{ value: 'A', label: 'A · Zeitverkauf' }, { value: 'B', label: 'B · Reduktion und Restverkauf' }, { value: 'C', label: 'C · Prüfung alle 15 Tage' }]} />
+          <Select label="Geplanter Einstiegshebel" disabled={locked || config.variant === 'C'} value={config.leverage} onChange={e => set('leverage', Number(e.target.value))} options={[1.5, 1.9, 2, 2.3].map(n => ({ value: String(n), label: levelLabel(n) }))} />
         </div>
         <fieldset className="space-y-3">
           <legend className="mb-2 text-sm font-medium text-white">Prüfprodukt für Handelssignale</legend>
@@ -179,6 +186,35 @@ function StrategySettings({ saved, locked, capitalManaged, channels, onSaved }: 
       </form>
     </details>
   );
+}
+
+function TelegramTests({ connected }: { connected: boolean }) {
+  const [busy, setBusy] = useState<TelegramTest | null>(null);
+  const [status, setStatus] = useState<{ message: string; error: boolean } | null>(null);
+  async function send(scenario: TelegramTest) {
+    setBusy(scenario);
+    setStatus(null);
+    try {
+      await request('/api/telegram/test', 'POST', { scenario });
+      setStatus({ message: `Telegram hat den Test „${telegramTestLabels[scenario]}“ angenommen.`, error: false });
+    } catch (error) {
+      setStatus({ message: error instanceof Error ? error.message : 'Testversand fehlgeschlagen.', error: true });
+    } finally {
+      setBusy(null);
+    }
+  }
+  return <section id="telegram-tests" className={`${panel} scroll-mt-20`}>
+    <h2 className="text-lg font-semibold text-white">Telegram-Signale testen</h2>
+    <p className="mt-2 text-sm text-muted">{connected
+      ? 'Jeder Knopf sendet ein fiktives Beispiel an deinen verknüpften Telegram-Chat.'
+      : 'Verbinde Telegram, um Testnachrichten zu senden.'}</p>
+    <div className="mt-4 flex flex-wrap gap-2">
+      {(Object.keys(telegramTestLabels) as TelegramTest[]).map(scenario => <Button key={scenario}
+        type="button" disabled={!connected || busy !== null} loading={busy === scenario}
+        onClick={() => void send(scenario)}>{telegramTestLabels[scenario]} testen</Button>)}
+    </div>
+    {status && <p role={status.error ? 'alert' : 'status'} className={`mt-3 text-sm ${status.error ? 'text-red-400' : 'text-accent'}`}>{status.message}</p>}
+  </section>;
 }
 
 type AppSettings = { alertEmail: string; vontobelIsin: string };
@@ -331,7 +367,9 @@ export default function SignalsPage() {
     : 'Emittentenstatus noch ungeklärt';
   const metrics = round && quote?.bid != null && quote.issuerStatus !== 'inactive' ? roundMetrics(round, quote.bid) : null;
   const entryPolicy = data.dataFeed?.entryPolicy ?? strategy.vixEntryPolicy ?? 'realtime';
-  const variantText = variants[strategy.variant];
+  const legacyC = strategy.variant === 'C' && round != null && round.reviewPeriod == null;
+  const reviewRules = strategy.variant === 'C' && !legacyC;
+  const variantText = legacyC ? `${reduction}. Rundenverlustlimit −6 %` : variants[strategy.variant];
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-4 lg:p-8">
@@ -356,10 +394,12 @@ export default function SignalsPage() {
       <section className={panel}>
         <h2 className="text-lg font-semibold text-white">Aktuelle Strategie</h2>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted">
-          <li><span className="text-white">Long-Kaufstufen</span> · {entryLevels(strategy).map((level, index) => `${index === 0 ? 'unter ' : ''}${levelLabel(level)} → ${ENTRY_TARGETS[index]} %`).join(' · ')} kumulierter Einsatz</li>
+          <li><span className="text-white">Long-Kaufstufen</span> · {(legacyC ? strategy.entryLevels ?? DEFAULT_VIX_LEVELS : entryLevels(strategy)).map((level, index) => `unter ${levelLabel(level)} → ${ENTRY_TARGETS[index]} %`).join(' · ')} kumulierter Einsatz</li>
           <li><span className="text-white">VIX-Niveau-Meldungen</span> · bei oder unter {notificationLevels(config).map(levelLabel).join(' / ')}</li>
           <li><span className="text-white">Einstieg</span> · Hebelziel {levelLabel(strategy.leverage)}, VX-Aufschlag max. 15 %, VX-Restlaufzeit mind. 30 Tage</li>
-          <li><span className="text-white">Ausstieg</span> · Variante {strategy.variant}, {variantText}. Positionsverlustgrenze −40 %. Trailing ab +10 % mit 8 / 6 / 5 % Abstand.</li>
+          <li><span className="text-white">Ausstieg</span> · Variante {strategy.variant}. {variantText}. {reviewRules
+            ? 'Positionsverlustgrenze −35 %. Trailing ab +30 %, Verkaufsschwelle 5 Prozentpunkte unter dem erreichten Renditehoch.'
+            : 'Positionsverlustgrenze −40 %. Trailing ab +10 % mit 8 / 6 / 5 % Abstand.'}</li>
           <li><span className="text-white">Strategiekapital</span> · {euro(round?.capital ?? config.capital)}{round ? ` · ${euro(round.spent)} bestätigt eingesetzt` : ''}</li>
         </ul>
         <StrategySettings saved={config} locked={locked} capitalManaged={data.capitalManaged} channels={data.channels} onSaved={state => { void mutate(current => current && { ...current, ...state }); }} />
@@ -385,10 +425,11 @@ export default function SignalsPage() {
 
       {round && <section className={panel}>
         <h2 className="text-lg font-semibold text-white">Offene Signalrunde</h2>
-        <dl className="mt-3 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+        <dl className="mt-3 grid grid-cols-2 gap-4 text-sm sm:grid-cols-5">
           <div><dt className="text-xs text-muted">Bestand</dt><dd className="mt-1">{round.lots.reduce((sum, lot) => sum + lot.quantity, 0)} Stück</dd></div>
+          <div><dt className="text-xs text-muted">Rendite der offenen Position</dt><dd className="mt-1">{metrics && metrics.cost > 0 ? percentage(metrics.factor - 1) : 'Bewertung ausstehend'}</dd></div>
           <div><dt className="text-xs text-muted">Rundenergebnis vor Steuern</dt><dd className="mt-1">{metrics ? euro(metrics.pnl) : 'Bewertung ausstehend'}</dd></div>
-          <div><dt className="text-xs text-muted">Trailing</dt><dd className="mt-1">{round.trailing ? 'Aktiv' : 'Ab +10 %'}</dd></div>
+          <div><dt className="text-xs text-muted">Trailing</dt><dd className="mt-1">{round.trailing ? `Schwelle ${percentage(round.floorFactor - 1)}` : reviewRules ? 'Ab +30 %' : 'Ab +10 %'}</dd></div>
           <div><dt className="text-xs text-muted">Beginn</dt><dd className="mt-1">{time(round.startedAt)}</dd></div>
         </dl>
         {metrics && <p className="mt-3 text-xs text-muted">Letzter Geldkurs {quote?.productAt ? time(quote.productAt) : 'ohne Zeitangabe'} · bisher bestätigte Gebühren enthalten.</p>}
@@ -409,6 +450,7 @@ export default function SignalsPage() {
       </section>
 
       <NotificationSettings onSaved={refresh} />
+      <TelegramTests connected={data.channels.telegram} />
       {history.length > 0 && <details className={panel}>
         <summary className="cursor-pointer text-lg font-semibold text-white">Signalverlauf</summary>
         <div className="mt-4 space-y-3">{history.slice(0, 30).map(signal => <SignalCard key={signal.id} signal={signal} now={now} onDone={refresh} />)}</div>
@@ -425,6 +467,7 @@ export default function SignalsPage() {
         <summary className="cursor-pointer font-medium text-white">Datenregeln und Ausführung</summary>
         <div className="mt-3 space-y-2">
           <p>{entryPolicy === 'delayed20' ? 'Einstieg mit Yahoo-VIX bis 20 Minuten Kursalter.' : 'Einstieg mit Echtzeit-VIX bis 5 Minuten Kursalter.'} Verkaufssignale verwenden einen Vontobel-Geldkurs bis 5 Minuten Kursalter.</p>
+          <p>Die Positionsrendite vergleicht den Geldwert aller offenen Stücke mit ihren bestätigten Kaufkosten inklusive Kaufgebühren. Nach einem Teilverkauf zählen die offenen Reststücke und ihre anteiligen Kosten.</p>
           <p>Die App benachrichtigt dich. Du handelst beim Broker und erfasst danach die tatsächliche Ausführung. Eigenständige Käufe im Trade-Verlauf erscheinen ohne bestätigte Signalausführung außerhalb der Signalrunde.</p>
         </div>
       </details>

@@ -39,6 +39,7 @@ export async function PUT(req: NextRequest) {
   if (!allowed(req) || !sameOrigin(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const config = configSchema.parse(await req.json());
+    if (config.variant === 'C' && config.leverage !== 2) throw new Error('Der Zielhebel für Variante C ist 2');
     if (config.enabled && (!config.broker || !config.opensAt || !config.closesAt || config.opensAt >= config.closesAt || (!config.email && !config.telegram))) throw new Error('Für die Überwachung Brokerzeiten und mindestens einen Versandkanal einrichten');
     if (config.productVerified && (!config.isin || !config.futureSymbol || !config.futureExpiry || !config.futureName || config.barrier <= 0)) throw new Error('Für das geprüfte Long-Produkt ISIN, Knock-out-Barriere und VX-Basisvertrag ergänzen');
     const result = await changeState(async (state, tx) => {

@@ -7,14 +7,71 @@ const compiled = ts.transpileModule(fs.readFileSync('lib/signals/engine.ts', 'ut
 const mod = new Module(__filename); mod._compile(compiled, __filename);
 const { initialState, evaluate, confirm, roundMetrics, marketOpen } = mod.exports;
 const start = new Date('2026-11-17T15:00:00Z');
-const cfg = { enabled: true, capital: 10000, variant: 'C', leverage: 2.3, isin: 'DE000TEST0001', wkn: 'TEST00', futureName: 'VX February 2027', futureSymbol: 'UXG7', futureExpiry: '2027-02-17', productVerified: true, barrier: 5, email: true, telegram: true, broker: 'Testbroker / Testplatz', opensAt: '08:00', closesAt: '22:00', closedDates: [] };
+const cfg = { enabled: true, capital: 10000, variant: 'C', leverage: 2, entryLevels: [15.5, 14.5, 13.5], isin: 'DE000TEST0001', wkn: 'TEST00', futureName: 'VX February 2027', futureSymbol: 'UXG7', futureExpiry: '2027-02-17', productVerified: true, barrier: 5, email: true, telegram: true, broker: 'Testbroker / Testplatz', opensAt: '08:00', closesAt: '22:00', closedDates: [] };
 const quote = (vix, now = start, bid = 10, ask = 10) => ({ isin: cfg.isin, at: now.toISOString(), vix, vixRealtime:true,vixAt: now.toISOString(), future: vix * 1.1, futureAt: now.toISOString(), bid, ask, productAt: now.toISOString(), askAt: now.toISOString(), productValid: true });
 function ready() { const s = initialState(); s.config = { ...cfg }; return s; }
 function crossed(value = 15, bid = 10) { const s = evaluate(ready(), quote(16, new Date(start - 60000)), new Date(start - 60000)); return evaluate(s, quote(value, start, bid), start); }
-function bought() { const s = crossed(); return confirm(s, { signalId: s.signals[0].id, action: 'execute', quantity: 299, price: 10, fees: 5, at: start.toISOString() }, start); }
+function bought() { const s = crossed(); const result = confirm(s, { signalId: s.signals[0].id, action: 'execute', quantity: 299, price: 10, fees: 5, at: start.toISOString() }, start); delete result.round.reviewPeriod; return result; }
 function atDays(days) { return new Date(start.getTime() + days * 86400000); }
+function newBought() {
+  const state = ready();
+  delete state.config.entryLevels;
+  const early = new Date(start - 60000);
+  const armed = evaluate(state, quote(16, early), early);
+  const entered = evaluate(armed, quote(15.9), start);
+  assert.equal(entered.signals[0].targetPct, 30);
+  return confirm(entered, { signalId: entered.signals[0].id, action: 'execute', quantity: 200, price: 10 }, start);
+}
+
+test('new C crosses strictly under 16, 15 and 14 and leaves notice levels separate', () => {
+  const state = newBought();
+  assert.deepEqual(mod.exports.notificationLevels(state.config), [15.5, 14.5, 13.5]);
+  const first = new Date(start.getTime() + 60000);
+  const atThreshold = evaluate(state, quote(15, first), first);
+  assert.equal(atThreshold.signals.filter(signal => signal.status === 'pending').length, 0);
+  const later = new Date(first.getTime() + 60000);
+  assert.equal(evaluate(atThreshold, quote(14.9, later), later).signals[0].targetPct, 40);
+  assert.equal(evaluate(atThreshold, quote(13.9, later), later).signals[0].targetPct, 50);
+});
+
+test('new C repeats the 15-day review, halves once and then uses the remaining cost basis', () => {
+  let state = newBought();
+  const tick = (days, bid) => { const now = atDays(days); state = evaluate(state, quote(16, now, bid), now); };
+  tick(15, 9.2);
+  tick(16, 8.8);
+  assert.equal(state.signals.filter(signal => signal.status === 'pending').length, 0);
+  tick(30, 8.8);
+  assert.equal(state.signals[0].sellKind, 'partial');
+  assert.equal(state.signals[0].quantity, 100);
+  state = confirm(state, { signalId: state.signals[0].id, action: 'execute', quantity: 100, price: 8.8 }, atDays(30));
+  tick(45, 8.1);
+  assert.equal(state.signals.filter(signal => signal.status === 'pending').length, 0);
+  tick(62, 8);
+  assert.equal(state.signals[0].sellKind, 'remaining');
+  assert.equal(state.signals[0].quantity, 100);
+});
+
+test('new C trails five percentage points below the peak and escalates to loss stop', () => {
+  let state = newBought();
+  const tick = (minutes, bid) => {
+    const now = new Date(start.getTime() + minutes * 60000);
+    state = evaluate(state, quote(16, now, bid), now);
+  };
+  tick(1, 12.99);
+  assert.equal(state.round.trailing, false);
+  tick(2, 13);
+  assert.equal(state.round.floorFactor, 1.25);
+  tick(3, 14);
+  assert.ok(Math.abs(state.round.floorFactor - 1.35) < 1e-12);
+  tick(4, 13.5);
+  assert.equal(state.signals[0].sellKind, 'trailing');
+  tick(5, 6.5);
+  assert.equal(state.signals[0].sellKind, 'loss');
+  assert.equal(state.signals[1].status, 'superseded');
+  assert.equal(state.signals[0].quantity, 200);
+});
 test('no initial purchase merely because VIX is low', () => assert.equal(evaluate(ready(), quote(14), start).signals.length, 0));
-test('first threshold and jump use cumulative 30/40/50 allocation', () => { for (const [v, pct] of [[15, 30], [14.5, 40], [13.5, 50], [12.4, 50]]) { const s = crossed(v); assert.equal(s.signals[0].targetPct, pct); assert.equal(s.signals[0].budget, pct * 100); } });
+test('first threshold and jump use cumulative 30/40/50 allocation', () => { for (const [v, pct] of [[15, 30], [14.49, 40], [13.49, 50], [12.4, 50]]) { const s = crossed(v); assert.equal(s.signals[0].targetPct, pct); assert.equal(s.signals[0].budget, pct * 100); } });
 test('stale, future-dated and missing timestamps never create a buy', () => { for (const at of [null, '2026-11-17T14:00:00Z', '2026-11-17T15:05:00Z']) { const s = ready(); s.previousVix = 16; s.previousVixAt = '2026-11-17T14:59:00Z'; s.armed = true; const q = quote(15); q.productAt = at; assert.equal(evaluate(s, q, start).signals.length, 0); } });
 test('missing ask, inactive product, wrong contract or >15% premium block buys', () => { for (const changes of [{ ask: null }, { productValid: false }, { isin: 'DE000WRONG01' }, { future: 30 }]) { const s = ready(); s.previousVix = 16; s.previousVixAt = '2026-11-17T14:59:00Z'; s.armed = true; assert.equal(evaluate(s, { ...quote(15), ...changes }, start).signals.length, 0); } });
 test('sample gaps do not infer missed crossings', () => { const s = ready(); s.previousVix = 16; s.previousVixAt = '2026-11-17T14:00:00Z'; s.armed = true; assert.equal(evaluate(s, quote(15), start).signals.length, 0); });
@@ -133,7 +190,8 @@ test('configured entry levels control crossing, explanation, and frozen round st
   const round = confirm(crossing, { signalId: crossing.signals[0].id, action: 'execute', quantity: 299, price: 10 }, start);
   round.config.entryLevels = [24, 21, 19];
   const next = new Date(start.getTime() + 60_000);
-  assert.equal(evaluate(round, quote(18, next), next).signals[0].targetPct, 40);
+  assert.equal(evaluate(round, quote(18, next), next).signals.filter(signal => signal.status === 'pending').length, 0);
+  assert.equal(evaluate(round, quote(17.9, next), next).signals[0].targetPct, 40);
 });
 
 test('definitive inactivity supersedes a pending recommendation and permits subsequent manual settlement', () => {
