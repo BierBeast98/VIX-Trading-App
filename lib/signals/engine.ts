@@ -29,11 +29,13 @@ export type Signal = { id: string; roundId: string | null; side: 'buy' | 'sell';
   budget: number; targetPct: number; stage: number; price: number; quantity: number;
   allocations: { lotId: string; quantity: number }[]; capital: number; vix: number | null;
   vixAt?: string | null; vixSource?: string; vixFeedMode?: Quote['vixFeedMode']; vixAgeMinutes?: number | null;
+  telegramMessages?: string[];
   quoteAt: string; notification: Partial<Record<'email' | 'telegram', { sentAt?: string; error?: string }>>;
 };
 export type Execution = { id: string; signalId: string; side: 'buy' | 'sell'; isin: string;
   quantity: number; price: number; fees: number; taxWithheld?: number | null; settlement?: boolean; at: string; note: string };
 export type State = { version: 1; config: Config; round: Round | null; signals: Signal[];
+  receipts?: { id: string; at: string; signalId?: string; levelId?: string; fields?: { isin?: string; quantity?: number; price?: number; fees?: number } }[];
   levels?: import('./levels').LevelState; executions: Execution[]; armed: boolean; previousVix: number | null; previousVixAt: string | null;
   checkedAt: string | null; health: string; quote: Quote | null };
 export const defaults: Config = { enabled: false, capital: 10000, variant: 'C', leverage: 2, vixEntryPolicy: 'realtime',

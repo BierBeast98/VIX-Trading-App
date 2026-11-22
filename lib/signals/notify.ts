@@ -5,16 +5,13 @@ import { marketOpen, fresh, entryVixUsable, type Signal, type State } from './en
 const eur = (n: number) => n.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
 export function signalText(s: Signal, reminder = false, test = false) {
   const heading = s.side === 'buy' ? 'KAUFSIGNAL' : 'VERKAUFSSIGNAL';
-  return [test ? `TEST · ${heading}` : reminder ? 'Erinnerung: Ausführung noch nicht erfasst' : heading,
-    s.reason, `ISIN: ${s.isin}`, `Rundenbudget: ${eur(s.capital)}`,
-    s.side === 'buy' ? `Zielquote: ${s.targetPct} % · zusätzlicher Betrag bis ${eur(s.budget)} inkl. Gebühren` : 'Verkauf der angegebenen Stückzahl',
-    `${s.quantity} Stück · ${s.side === 'buy' ? 'Briefkurs' : 'Geldkurs'} bei Signal: ${eur(s.price)}`,
-    s.side === 'buy' ? `VIX-Einstiegsbasis: ${s.vixSource === 'yahoo' ? 'Yahoo Finance' : s.vixSource ?? 'Quelle nicht aufgezeichnet'} · ${s.vixFeedMode === 'delayed' ? 'verzögert' : s.vixFeedMode === 'realtime' ? 'Echtzeit' : 'Feedmodus nicht aufgezeichnet'} · Kurszeit ${s.vixAt ? new Date(s.vixAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' }) : 'nicht aufgezeichnet'} · Alter bei Signal ${s.vixAgeMinutes != null ? s.vixAgeMinutes.toFixed(1) + ' Min.' : 'nicht aufgezeichnet'}` : '',
-    s.side === 'buy' && s.vixFeedMode === 'delayed' ? 'VIX-Einstiegsbasis ist zeitversetzt; der aktuelle Zertifikatskurs kann bereits auf Marktbewegungen reagiert haben.' : '',
-    `Vontobel-Kurszeit: ${new Date(s.quoteAt).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })}`,
-    s.side === 'buy' ? `Kaufsignal gültig bis ${new Date(s.expiresAt).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin' })}; Gebühren bei Stückzahl berücksichtigen.` : 'Verkaufssignal bleibt bis zur Bestätigung offen. Aktuellen Kurs vor der Order prüfen.',
-    test ? 'Fiktives Szenario. Keine Order aufgeben.' : 'Order selbst beim Broker aufgeben. Danach Screenshot senden oder Ausführung in der App erfassen.',
-    process.env.APP_URL ? `${process.env.APP_URL.replace(/\/$/, '')}/signals${test ? '' : '#' + s.id}` : '',
+  const entry = s.side === 'buy' && !s.roundId;
+  return [test ? `TEST · ${heading}` : reminder ? `Erinnerung · ${heading}` : heading,
+    s.reason,
+    !entry && `ISIN: ${s.isin}`,
+    s.side === 'buy' && `Rundenbudget: ${eur(s.capital)}`,
+    s.side === 'buy' && `Zielquote: ${s.targetPct} % · Einsatz bis ${eur(s.budget)} inkl. Gebühren`,
+    !entry && `${s.quantity} Stück · ${s.side === 'buy' ? 'Briefkurs' : 'Geldkurs'}: ${eur(s.price)}`,
   ].filter(Boolean).join('\n');
 }
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
@@ -55,6 +52,7 @@ export async function deliverSignals() {
       });
       if (!claimed) continue;
       let error: string | undefined;
+      let replyKey: string | undefined;
       try {
         const text = signalText(claimed.signal, claimed.reminder);
         if (channel === 'telegram') {
@@ -66,13 +64,14 @@ export async function deliverSignals() {
           });
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error('Telegram hat die Nachricht nicht angenommen');
+          if (Number.isSafeInteger(data.result?.message_id)) replyKey = `${chatId}:${data.result.message_id}`;
         } else {
           const { prisma } = await import('@/lib/prisma');
           const settings = await prisma.settings.findUnique({ where: { id: 1 } });
           if (!process.env.RESEND_API_KEY || !settings?.alertEmail) throw new Error('E-Mail noch nicht eingerichtet');
           const result = await new Resend(process.env.RESEND_API_KEY).emails.send({
             from: process.env.ALERT_FROM_EMAIL || 'VIX Trading <onboarding@resend.dev>', to: settings.alertEmail,
-            subject: `${signal.side === 'buy' ? 'Kaufsignal' : 'Verkaufssignal'}: ${signal.isin}`, text,
+            subject: signal.side === 'buy' && !signal.roundId ? 'Kaufsignal' : `${signal.side === 'buy' ? 'Nachkauf' : 'Verkaufssignal'}: ${signal.isin}`, text,
           }, { idempotencyKey: `signal-${signal.id}-${Math.floor(Date.now() / (15 * 60000))}` });
           if (result.error) throw new Error('E-Mail-Anbieter hat die Nachricht nicht angenommen');
         }
@@ -83,6 +82,7 @@ export async function deliverSignals() {
       await changeState(async s => {
         const target = s.signals.find(x => x.id === signal.id);
         if (target) {
+          if (replyKey) (target.telegramMessages ??= []).push(replyKey);
           const old = target.notification[channel];
           target.notification[channel] = error ? { ...old, error } : { sentAt: new Date().toISOString() };
           delete (target.notification as Record<string, unknown>)[leaseKey];

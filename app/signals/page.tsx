@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { ReceiptForm } from './receipt-form';
 import useSWR from 'swr';
 import { BellRing, Check, ChevronDown, RefreshCw, ShieldCheck } from 'lucide-react';
 import { Input, Select, Textarea } from '@/components/ui/input';
@@ -20,7 +21,8 @@ async function request(url: string, method: string, body?: unknown) {
   if (!res.ok) throw new Error(data.error ?? 'Anfrage fehlgeschlagen');
   return data;
 }
-function SignalCard({ signal, now, onDone }: { signal: Signal; now: Date; onDone: () => void }) {
+type Receipt = NonNullable<State['receipts']>[number];
+function SignalCard({ signal, receipt, now, onDone }: { signal: Signal; receipt?: Receipt; now: Date; onDone: () => void }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [quantity, setQuantity] = useState(String(signal.quantity)), [price, setPrice] = useState(''), [fees, setFees] = useState('');
   const [at, setAt] = useState(''), [note, setNote] = useState(''), [tax, setTax] = useState('');
@@ -56,6 +58,13 @@ function SignalCard({ signal, now, onDone }: { signal: Signal; now: Date; onDone
     {canRecord && <div className="mt-5 border-t border-[#1E1E28] pt-4">
       <p className="mb-3 text-sm text-[#8B8FA8]">Trade ausgeführt? Schicke den Screenshot im Chat. Alternativ hier selbst erfassen.</p>
       {expired && <p className="mb-3 text-sm text-amber-300">Dieses Kaufsignal ist nicht mehr aktuell. Nur eine bereits erfolgte Ausführung nachtragen.</p>}
+      {receipt && <div className="mb-3 text-sm text-muted">
+        <a className="text-accent underline" href={`/api/telegram/receipts?id=${encodeURIComponent(receipt.id)}`} target="_blank" rel="noreferrer">Telegram-Beleg prüfen</a>
+        {receipt.fields?.isin === signal.isin && <Button variant="ghost" onClick={() => {
+          setQuantity(String(receipt.fields?.quantity ?? '')); setPrice(String(receipt.fields?.price ?? ''));
+          setFees(String(receipt.fields?.fees ?? '')); setNote(`Telegram-Beleg ${receipt.id}`); setOpen(true);
+        }}>Belegdaten übernehmen</Button>}
+      </div>}
       <Button onClick={() => setOpen(!open)}><Check size={16} />Ausführung erfassen<ChevronDown size={14} /></Button>
       {signal.status === 'pending' && <Button className="ml-2" variant="ghost" loading={busy} onClick={() => submit('skip')}>Nicht ausgeführt</Button>}
       {open && <form className="mt-5 grid gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void submit('execute'); }}>
@@ -318,6 +327,8 @@ function SettlementForm({ round, onDone }: { round: Round; onDone: () => void })
 }
 
 export default function SignalsPage() {
+  const [inboxBusy, setInboxBusy] = useState(false);
+  const [inboxStatus, setInboxStatus] = useState('');
   const { data, error: networkError, mutate } = useSWR<Payload>('/api/signals', url => request(url, 'GET'), { refreshInterval: 30000 });
   const [message, setMessage] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [clock, setClock] = useState<number | null>(null);
@@ -419,8 +430,27 @@ export default function SignalsPage() {
 
       <section>
         <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-white"><BellRing size={18} className="text-accent" />Offene Handelssignale</h2>
-        <div className="space-y-3">{pending.length ? pending.map(signal => <SignalCard key={signal.id} signal={signal} now={now} onDone={refresh} />)
+        <div className="space-y-3">{pending.length ? pending.map(signal => <SignalCard key={signal.id} signal={signal} receipt={data.receipts?.find(r => r.signalId === signal.id)} now={now} onDone={refresh} />)
           : <div className={`${panel} text-center`}><ShieldCheck className="mx-auto mb-2 text-muted" size={24} /><p className="text-sm text-muted">Kein offenes Handelssignal</p></div>}</div>
+      </section>
+
+      <section className={panel}>
+        <h2 className="text-lg font-semibold text-white">Kaufbelege aus Telegram</h2>
+        <p className="my-3 text-sm text-muted">Schicke den Kaufbeleg als Foto oder Bilddatei (JPG, PNG, WebP, bis 8 MB) an den verbundenen Bot. Wenn du auf ein Handelssignal antwortest, erscheint der Beleg mit einem Link zum Signal.</p>
+        <Button loading={inboxBusy} onClick={async () => {
+          setInboxBusy(true);
+          try { await request('/api/telegram/receipts', 'POST'); await mutate(); setInboxStatus('Belege aktualisiert'); }
+          catch { setInboxStatus('Abruf fehlgeschlagen. Bitte erneut versuchen.'); }
+          finally { setInboxBusy(false); }
+        }}>Belege abrufen</Button>
+        {inboxStatus && <p role="status" className="mt-2 text-sm text-muted">{inboxStatus}</p>}
+        {!data.receipts?.length && <p className="mt-3 text-sm text-muted">Noch keine Kaufbelege eingegangen.</p>}
+        {data.receipts?.map(r => <div key={r.id} className="mt-3 flex flex-wrap gap-4 text-sm">
+          <a className="text-accent underline" href={`/api/telegram/receipts?id=${encodeURIComponent(r.id)}`} target="_blank" rel="noreferrer">Beleg vom {time(r.at)} öffnen</a>
+          {r.fields && <span className="text-muted">{[r.fields.isin, r.fields.quantity && `${r.fields.quantity} Stück`, r.fields.price && `Kurs ${euro(r.fields.price)}`, r.fields.fees != null && `Gebühren ${euro(r.fields.fees)}`].filter(Boolean).join(' · ')}</span>}
+          {r.signalId && <a className="text-accent underline" href={`#${r.signalId}`}>Zur Ausführung</a>}
+          <ReceiptForm receipt={r} state={data} onDone={refresh} />
+        </div>)}
       </section>
 
       {round && <section className={panel}>
@@ -442,7 +472,7 @@ export default function SignalsPage() {
         {!(data.levels?.events?.length) && <p className="mt-3 text-sm text-muted">Noch keine Niveau-Meldung aufgezeichnet.</p>}
         {(data.levels?.events ?? []).slice(0, 10).map(event => (
           <article key={event.id} className="mt-3 space-y-1 border-t border-border pt-3 text-sm text-muted">
-            <p className="text-white">Niveau {event.levels.map(levelLabel).join(' / ')} erreicht · VIX {levelLabel(event.value)}</p>
+            <p className="text-white">{event.entryHint ? 'Einstiegshinweis' : `Niveau ${event.levels.map(levelLabel).join(' / ')} erreicht`} · VIX {levelLabel(event.value)}</p>
             <p>Kurszeit {time(event.sourceAt)} · {event.source === 'yahoo' ? 'Yahoo Finance' : event.source}{event.delayed ? ' · verzögert' : ''}</p>
             <p className="text-xs">{(['telegram', 'email'] as const).map(channel => `${channel === 'telegram' ? 'Telegram' : 'E-Mail'}: ${event.notification[channel]?.sentAt ? 'vom Anbieter angenommen' : !config[channel] ? 'deaktiviert' : event.notification[channel]?.error ?? (clock - Date.parse(event.at) > 1800000 ? 'Versandfenster abgelaufen' : 'Versand ausstehend')}`).join(' · ')}</p>
           </article>
@@ -453,7 +483,7 @@ export default function SignalsPage() {
       <TelegramTests connected={data.channels.telegram} />
       {history.length > 0 && <details className={panel}>
         <summary className="cursor-pointer text-lg font-semibold text-white">Signalverlauf</summary>
-        <div className="mt-4 space-y-3">{history.slice(0, 30).map(signal => <SignalCard key={signal.id} signal={signal} now={now} onDone={refresh} />)}</div>
+        <div className="mt-4 space-y-3">{history.slice(0, 30).map(signal => <SignalCard key={signal.id} signal={signal} receipt={data.receipts?.find(r => r.signalId === signal.id)} now={now} onDone={refresh} />)}</div>
       </details>}
       {data.executions.length > 0 && <section className={panel}>
         <h2 className="text-lg font-semibold text-white">Bestätigte Abrechnungen</h2>

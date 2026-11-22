@@ -21,6 +21,7 @@ export async function deliverLevels() {
       });
       if (!claimed) continue;
       let error: string | undefined;
+      let telegramMessage: string | undefined;
       try {
         const text = levelText(claimed);
         if (channel === 'telegram') {
@@ -31,7 +32,9 @@ export async function deliverLevels() {
             body: JSON.stringify({ chat_id: chatId, text, link_preview_options: { is_disabled: true } }),
             signal: AbortSignal.timeout(10000),
           });
-          if (!response.ok || !(await response.json()).ok) throw new Error('delivery failed');
+          const result = await response.json();
+          if (Number.isSafeInteger(result.result?.message_id)) telegramMessage = `${chatId}:${result.result.message_id}`;
+          if (!response.ok || !result.ok) throw new Error('delivery failed');
         } else {
           const settings = await prisma.settings.findUnique({ where: { id: 1 } });
           if (!settings?.alertEmail || !process.env.RESEND_API_KEY) throw new Error('not configured');
@@ -44,6 +47,7 @@ export async function deliverLevels() {
       } catch { error = 'Zustellung fehlgeschlagen; erneuter Versuch innerhalb von 30 Minuten'; }
       await changeState(async state => {
         const target = state.levels?.events.find(e => e.id === event.id);
+        if (target && telegramMessage && !error) target.telegramMessage = telegramMessage;
         if (target) target.notification[channel] = error ? { error } : { sentAt: new Date().toISOString() };
         return { state, result: undefined };
       });

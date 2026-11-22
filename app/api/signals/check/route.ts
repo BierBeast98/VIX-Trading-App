@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { allowed, cronAllowed, sameOrigin } from '@/lib/signals/auth';
 import { monitorCronAllowed, recordMonitorRun } from '@/lib/signals/schedule';
+import { syncTelegramReceipts } from '@/lib/signals/telegram-inbox';
 import { runSignalsCheck } from '@/lib/signals/service';
 import { limitBearer } from '@/lib/signals/rate-limit';
 export const dynamic = 'force-dynamic';
@@ -18,9 +19,9 @@ export async function POST(req: NextRequest) {
 async function run(scheduled = false) {
   const startedAt = new Date().toISOString();
   try {
-    const result = await runSignalsCheck();
+    const [result, receiptsSynced] = await Promise.all([runSignalsCheck(), syncTelegramReceipts().then(() => true, () => false)]);
     if (scheduled) await recordMonitorRun(startedAt, result.checked);
-    return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
+    return NextResponse.json({ ...result, receiptsSynced }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     if (scheduled) await recordMonitorRun(startedAt, false, true);
     return NextResponse.json({ error: 'Signalprüfung fehlgeschlagen; keine Ausführung gebucht' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });

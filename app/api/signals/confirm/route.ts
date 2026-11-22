@@ -8,6 +8,7 @@ const cashDetails = {
 };
 const schema = z.discriminatedUnion('action', [
   z.object({ signalId: z.uuid(), action: z.enum(['execute', 'skip']),
+    receipt: z.object({ id: z.string().regex(/^telegram-receipt:\d+:\d+:\d+$/), isin: z.string().regex(/^[A-Z]{2}[A-Z0-9]{9}\d$/) }).optional(),
     quantity: z.number().int().positive().max(100000000).optional(), price: z.number().finite().positive().optional(),
     fees: z.number().finite().nonnegative().optional(), at: z.iso.datetime({ offset: true }).optional(), ...cashDetails,
   }).strict(),

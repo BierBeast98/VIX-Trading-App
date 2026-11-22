@@ -25,7 +25,7 @@ const examples = {
 export function telegramTestSignal(scenario: TelegramTest, now: Date): Signal {
   const at = now.toISOString();
   return {
-    id: '', roundId: null, isin: 'DEMO (fiktiv)', at, quoteAt: at,
+    id: '', roundId: scenario === 'buy' ? null : 'demo', isin: 'DEMO (fiktiv)', at, quoteAt: at,
     expiresAt: new Date(now.getTime() + 5 * 60000).toISOString(),
     status: 'pending', capital: 1500, stage: 1, targetPct: 0, budget: 0,
     allocations: [], vix: null, notification: {},
