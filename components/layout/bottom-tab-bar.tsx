@@ -7,6 +7,7 @@ import {
   Briefcase,
   BellRing,
 } from "lucide-react";
+import { useSignalOverview } from "@/lib/use-signal-overview";
 
 const tabs = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -16,41 +17,33 @@ const tabs = [
 
 export function BottomTabBar() {
   const pathname = usePathname();
+  const pending = useSignalOverview()?.pending.length ?? 0;
 
   return (
     <nav
       aria-label="Schnellnavigation"
-      className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t lg:hidden"
+      className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-3 border-t border-border bg-background/95 px-3 backdrop-blur lg:hidden"
       style={{
-        background: "#0C0C0F",
-        borderColor: "#1E1E28",
         height: "calc(64px + env(safe-area-inset-bottom))",
         paddingBottom: "env(safe-area-inset-bottom)",
-        paddingTop: 4,
       }}
     >
       {tabs.map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href || pathname.startsWith(href + "/");
+        const dot = href === "/signals" && pending > 0;
         return (
           <Link
             key={href}
             href={href}
             aria-current={isActive ? "page" : undefined}
-            className="flex flex-col items-center justify-center gap-0.5 flex-1 py-2 relative"
+            aria-label={dot ? `${label}, ${pending} offen` : undefined}
+            className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium ${isActive ? "text-accent" : "text-muted"}`}
           >
-            <div className="relative">
-              <Icon
-                size={20}
-                style={{ color: isActive ? "#B8E15A" : "#8B8FA8" }}
-              />
-
-            </div>
-            <span
-              className="text-[10px] font-medium"
-              style={{ color: isActive ? "#B8E15A" : "#8B8FA8" }}
-            >
-              {label}
+            <span className="relative">
+              <Icon size={22} aria-hidden="true" />
+              {dot && <span aria-hidden="true" className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-background" />}
             </span>
+            {label}
           </Link>
         );
       })}

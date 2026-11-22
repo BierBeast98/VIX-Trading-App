@@ -25,6 +25,8 @@ interface VixHistoryChartProps {
   data: DataPoint[];
   futuresData?: DataPoint[];
   threshold?: number;
+  /** Long entry levels; when given they replace the single alert threshold line. */
+  levels?: { level: number; target: number }[];
   height?: number;
   period?: string;
 }
@@ -77,6 +79,7 @@ function VixHistoryChartInner({
   data,
   futuresData = [],
   threshold = 15,
+  levels = [],
   height = 280,
   period = "1m",
 }: VixHistoryChartProps) {
@@ -171,7 +174,17 @@ function VixHistoryChartInner({
           tickFormatter={(v: number) => v.toFixed(1)}
         />
         <Tooltip content={<CustomTooltip />} />
-        {threshold && (
+        {levels.map((l, i) => (
+          <ReferenceLine
+            key={l.level}
+            y={l.level}
+            stroke="#B8E15A"
+            strokeDasharray="5 5"
+            strokeOpacity={0.7 - i * 0.2}
+            label={{ value: `${l.level} · ${l.target} %`, fill: "#B8E15A", fontSize: 11, position: "insideTopRight" }}
+          />
+        ))}
+        {threshold && levels.length === 0 && (
           <ReferenceLine
             y={threshold}
             stroke="#B8E15A"

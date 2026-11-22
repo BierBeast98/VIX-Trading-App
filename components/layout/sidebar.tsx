@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSignalOverview } from "@/lib/use-signal-overview";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -28,13 +29,15 @@ export function Sidebar() {
   const [openOnPath, setOpenOnPath] = useState<string | null>(null);
   const mobileOpen = openOnPath === pathname;
   const close = () => setOpenOnPath(null);
+  const signals = useSignalOverview();
+  const pendingCount = signals?.pending.length ?? 0;
 
   const renderNav = (items: typeof navItems, showClose = false) => (
     <>
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-6 border-b" style={{ borderColor: "#1E1E28" }}>
         <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg"
+          className="flex h-8 w-8 items-center justify-center rounded-[9px]"
           style={{ background: "#B8E15A" }}
         >
           <Zap size={16} className="text-black" />
@@ -58,9 +61,10 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-1 p-3 flex-1">
+      <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5 p-3 flex-1">
         {items.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || pathname.startsWith(href + "/");
+          const badge = href === "/signals" && pendingCount > 0 ? pendingCount : null;
           return (
             <Link
               key={href}
@@ -68,33 +72,37 @@ export function Sidebar() {
               onClick={showClose ? close : undefined}
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
-                isActive
-                  ? "text-black"
-                  : "hover:text-white"
+                "flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm transition-colors",
+                isActive ? "bg-accent/12 font-medium text-accent" : "text-muted hover:bg-white/5 hover:text-white"
               )}
-              style={
-                isActive
-                  ? { background: "#B8E15A", color: "#000000" }
-                  : { color: "#8B8FA8" }
-              }
             >
-              <Icon size={16} />
+              <Icon size={17} aria-hidden="true" />
               <span className="flex-1">{label}</span>
-
+              {badge != null && (
+                <span className="rounded-full bg-accent px-1.5 text-[11px] font-bold leading-[18px] text-black" aria-label={`${badge} offene Signale`}>{badge}</span>
+              )}
             </Link>
           );
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="border-t p-4" style={{ borderColor: "#1E1E28" }}>
-        <div className="text-xs" style={{ color: "#4A4A5A" }}>
-          Kein Auto-Trading
-        </div>
-        <div className="text-xs" style={{ color: "#4A4A5A" }}>
-          Signale & Tracking
-        </div>
+      {/* Monitoring status */}
+      <div className="m-3 mt-0 flex flex-col gap-1.5 rounded-xl border border-border bg-surface p-3.5 text-xs text-muted">
+        {signals ? (
+          <>
+            <div className="flex items-center gap-2 text-[13px] font-medium text-white">
+              <span aria-hidden="true" className={cn("h-2 w-2 rounded-full", signals.enabled ? "bg-success" : "bg-muted")} />
+              {signals.enabled ? "Überwachung aktiv" : "Überwachung pausiert"}
+            </div>
+            <div>
+              {signals.checkedAt ? `Letzte Prüfung ${new Date(signals.checkedAt).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}` : "Noch nicht geprüft"}
+              {signals.opensAt && signals.closesAt && ` · ${signals.broker || "Broker"} ${signals.opensAt}–${signals.closesAt}`}
+            </div>
+          </>
+        ) : (
+          <div>Signale &amp; Tracking</div>
+        )}
+        <div>Kein Auto-Trading</div>
       </div>
     </>
   );
@@ -130,7 +138,7 @@ export function Sidebar() {
 
       {/* Desktop sidebar — always visible on lg+ */}
       <aside
-        className="hidden lg:flex h-full w-[220px] flex-shrink-0 flex-col border-r"
+        className="hidden lg:flex h-full w-[232px] flex-shrink-0 flex-col border-r"
         style={{ background: "#0C0C0F", borderColor: "#1E1E28" }}
       >
         {renderNav(navItems)}

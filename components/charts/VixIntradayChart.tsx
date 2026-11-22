@@ -10,6 +10,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  ReferenceLine,
 } from "recharts";
 
 // Intl.DateTimeFormat einmalig instanziieren — der Konstruktor ist teuer, format() ist billig
@@ -36,6 +37,8 @@ interface VixIntradayChartProps {
   futuresData?: DataPoint[];
   height?: number;
   minimal?: boolean;
+  /** Long entry levels drawn as dashed lines (only those inside the visible range). */
+  levels?: { level: number; target: number }[];
 }
 
 interface TooltipPayload {
@@ -82,6 +85,7 @@ function VixIntradayChartInner({
   futuresData = [],
   height = 200,
   minimal = false,
+  levels = [],
 }: VixIntradayChartProps) {
   const { formatted, futDataLength, minVal, maxVal } = useMemo(() => {
     const getCetLabel = (dt: Date) => CET_TIME_FMT.format(dt); // "HH:mm" in CET
@@ -206,6 +210,16 @@ function VixIntradayChartInner({
           hide={minimal}
         />
         {!minimal && <Tooltip content={<CustomTooltip />} />}
+        {!minimal && levels.map((l, i) => (
+          <ReferenceLine
+            key={l.level}
+            y={l.level}
+            stroke="#B8E15A"
+            strokeDasharray="5 5"
+            strokeOpacity={0.7 - i * 0.2}
+            label={{ value: `${l.level} · ${l.target} %`, fill: "#B8E15A", fontSize: 11, position: "insideTopRight" }}
+          />
+        ))}
         {/* VIX Spot — filled area */}
         <Area
           type="monotone"

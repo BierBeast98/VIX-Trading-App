@@ -503,3 +503,13 @@ Collector ruft nur Yahoo-VIX ab, speichert pro Intervall eine Beobachtung unter 
 - AUTH_EMAIL und AUTH_SESSION_SECRET bei Hostinger laut Variablennamen vorhanden; Werte sind über API maskiert, tatsächlicher Login muss nach Veröffentlichung durch den Nutzer geprüft werden. SIGNALS_ACCESS_KEY dient unverändert als Passwort und Widget-Bearer; separater Session-Secret.
 - Prozessübergreifender atomarer DB-Limiter: 8 Loginversuche und 120 Bearer-Anfragen pro 15 Minuten global, inkl. erfolgreicher Versuche. Fail-closed bei DB-Ausfall, eigenes Cron-Token ausgenommen, kein Vertrauen in IP-Header. Absichtliche temporäre Aussperrung bleibt möglich.
 - Telegram-Testnachricht: geschützte Route und Schaltfläche vorbereitet; keinerlei Handelssignal. Neue Auth-/Limit- und Signaltests, lokaler Produktionsbuild bestanden; PostgreSQL-Konkurrenztest auf separater lokaler Testdatenbank durch Reviewer erfolgreich. Vor Freigabe Live-Login und Versand prüfen.
+
+## 2026-11-22 — Redesign „Evolution 2“ (Desktop) und „D“ (iPhone), Branch `design/evolution-2`
+
+- Entwürfe: Design-Canvas „VIX Dashboard Redesign“ (Runde 2). Farben/Schrift unverändert (#0C0C0F, Lime #B8E15A, Geist); Kennzahlen jetzt in Geist Mono.
+- `app/dashboard/page.tsx`: Layout neu, Datenlogik unverändert. Desktop: Hero-Karte (VIX + Chart + Zeitraum), rechts Future-Karte (Spread, Aufschlag zum Spot, VX-Restlaufzeit aus Signal-Konfig) und Z-Score-Skala; darunter Signal-Karte, Position(en) mit Trailing- und Barrier-Balken, kompaktes Strategiekapital. Mobil: VIX-Hero mit Sparkline und Kaufstufen-Fortschritt, Signal-Banner, Future/Z-Kacheln, Tages-Range, Positionskarten, Chart mit allen Zeiträumen, Kapital.
+- Neu: `lib/use-signal-overview.ts` (liest `/api/signals` nur lesend, bei 401/Fehler `null` → Fallback-Karte), `components/dashboard/signal-card.tsx` (Karte, Banner, Stufenbalken).
+- Charts: optionales `levels`-Prop zeichnet die Long-Kaufstufen als Linien (Verlauf: ersetzt dann die Alert-Linie).
+- `VixFeedStatus`: zusätzliche Variante `pill`; `StrategyCapital`: Variante `compact`.
+- Sidebar: Aktiv-Zustand getönt statt vollflächig, Badge mit offenen Signalen, Statusbox (Überwachung/Prüfung/Brokerzeiten). Tab-Leiste: größere Icons, Punkt bei offenem Signal.
+- Geprüft: `tsc` ohne Fehler, alle Testsuiten grün; lokal im Dev-Server bei 1440 px und 375 px angesehen (mit echten Daten, ohne offene Position/Signal). Lokaler Login über `.env.local` mit reinen Test-Zugangsdaten (git-ignoriert). Nicht committet.
