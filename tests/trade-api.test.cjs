@@ -120,3 +120,29 @@ test('deleting one grouped trade preserves other open trades and position', asyn
   assert.equal((await trade.DELETE(request(undefined, 'DELETE'), params)).status, 200);
   assert.equal(state.trades.length, 1); assert.equal(state.positions.length, 1); assert.equal(state.positions[0].status, 'open');
 });
+
+test('broker costs preserve explicit zero, remain optional, and clear when reopening', async () => {
+  reset();
+  assert.equal((await trade.PUT(request({ exitFees: 0, taxWithheld: 0 }), params)).status, 400);
+  assert.equal((await trade.PUT(request({ exitDate: '2026-11-11', exitPrice: 3, entryFees: 0, exitFees: 1.5, taxWithheld: 0 }), params)).status, 200);
+  assert.equal(state.trades[0].entryFees, 0);
+  assert.equal(state.trades[0].exitFees, 1.5);
+  assert.equal(state.trades[0].taxWithheld, 0);
+  assert.equal((await trade.PUT(request({ taxWithheld: -1 }), params)).status, 400);
+  assert.equal((await trade.PUT(request({ notes: 'Abrechnung vorliegend' }), params)).status, 200);
+  assert.equal(state.trades[0].taxWithheld, 0);
+  assert.equal((await trade.PUT(request({ taxWithheld: null }), params)).status, 200);
+  assert.equal(state.trades[0].taxWithheld, null);
+  assert.equal((await trade.PUT(request({ exitDate: null }), params)).status, 200);
+  assert.equal(state.trades[0].entryFees, 0);
+  assert.equal(state.trades[0].exitFees, null);
+  assert.equal(state.trades[0].taxWithheld, null);
+});
+test('grouped position allocates fees and withholding exactly once across trades', async () => {
+  reset({ quantity: 3, entryFees: .1 });
+  state.trades.push({ ...clone(state.trades[0]), id: 't2', quantity: 7 });
+  const res = await positions.DELETE(request({ exitDate: '2026-11-11', exitPrice: 3, quantity: 10, exitFees: .03, taxWithheld: 4.07 }, 'DELETE'), posParams);
+  assert.equal(res.status, 200);
+  assert.deepEqual(state.trades.map(t => t.exitFees), [.01, .02]);
+  assert.deepEqual(state.trades.map(t => t.taxWithheld), [1.22, 2.85]);
+});

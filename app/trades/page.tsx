@@ -2,15 +2,18 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, Download, Bell, BellOff, TrendingUp, Loader2, ChevronDown } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Textarea } from "@/components/ui/input";
-import { calcPerformanceMetrics } from "@/lib/analytics";
-import { holdingDays, tradeReturn } from "@/lib/trade-metrics";
+import { analyzeEntryLevels, calcPerformanceMetrics } from "@/lib/analytics";
+import { certificateReturn, holdingDays, tradeNetResult, tradeReturn } from "@/lib/trade-metrics";
 import { formatDate, formatNumber, formatPct } from "@/lib/utils";
+import { formatEuros, TradePerformance } from "./trade-performance";
 
 interface Trade {
   id: string;
@@ -27,6 +30,9 @@ interface Trade {
   entryPrice: number | null;    // Einstiegskurs (EUR)
   exitPrice: number | null;     // Ausstiegskurs (EUR)
   quantity: number | null;      // Stückzahl
+  entryFees?: number | null;
+  exitFees?: number | null;
+  taxWithheld?: number | null;
   returnPct: number | null;
   holdDays: number | null;
   alertTriggered: boolean;
@@ -58,8 +64,9 @@ const TradeCardMobile = memo(function TradeCardMobile({
   onDelete,
 }: TradeItemProps & { isExpanded: boolean; onToggle: (id: string) => void }) {
   const derivedReturn = tradeReturn(trade);
+  const net = tradeNetResult(trade);
   const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
-  const abstand = trade.entryVix && trade.barrierLevel
+  const abstand = !trade.notes.startsWith("signal:") && trade.entryVix && trade.barrierLevel
     ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
   const isOpen = !trade.exitDate;
   const currentPnlPct = liveBid != null && trade.entryPrice != null && trade.entryPrice > 0
@@ -74,6 +81,7 @@ const TradeCardMobile = memo(function TradeCardMobile({
       {/* Compact row — always visible */}
       <button
         className="w-full flex items-center justify-between p-3.5 text-left"
+        aria-expanded={isExpanded}
         onClick={() => onToggle(trade.id)}
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -147,7 +155,7 @@ const TradeCardMobile = memo(function TradeCardMobile({
               </span>
             </div>
             <div>
-              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>VIX Future</span>
+              <span className="text-[10px] block" style={{ color: "#8B8FA8" }}>{trade.notes.startsWith("signal:") ? "VIX Spot" : "VIX Future"}</span>
               <span className="text-sm text-white">{formatNumber(trade.entryVix)}</span>
             </div>
             <div>
@@ -198,10 +206,19 @@ const TradeCardMobile = memo(function TradeCardMobile({
               </span>
             </div>
           )}
+          {!isOpen && (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border pt-3 text-sm">
+              <dt className="text-muted">Nach Gebühren</dt><dd className="text-right text-white">{formatEuros(net.beforeTax)}</dd>
+              <dt className="text-muted">Steuerabzug</dt><dd className="text-right text-white">{trade.taxWithheld == null ? "Offen" : formatEuros(trade.taxWithheld)}</dd>
+              <dt className="text-muted">Nach Steuern</dt><dd className="text-right text-white">{formatEuros(net.afterTax)}{net.afterTaxReturnPct != null && ` · ${formatPct(net.afterTaxReturnPct)}`}</dd>
+            </dl>
+          )}
           {trade.notes && (
             <p className="text-xs pt-1" style={{ color: "#8B8FA8" }}>{trade.notes}</p>
           )}
-          <div className="flex gap-2 pt-1">
+          {trade.notes.startsWith("signal:") ? (
+            <Link href="/signals" className="inline-block text-xs font-medium text-accent">Zu den Handelssignalen</Link>
+          ) : <div className="flex gap-2 pt-1">
             <button
               onClick={() => onEdit(trade)}
               className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium"
@@ -211,13 +228,14 @@ const TradeCardMobile = memo(function TradeCardMobile({
             </button>
             <button
               onClick={() => onDelete(trade.id)}
+              aria-label={`Trade ${trade.certificateId} löschen`}
               disabled={isDeleting}
               className="flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-medium"
               style={{ background: "rgba(255,77,77,0.1)", color: "#FF4D4D" }}
             >
               <Trash2 size={12} />
             </button>
-          </div>
+          </div>}
         </div>
       )}
     </div>
@@ -233,8 +251,9 @@ const TradeRowDesktop = memo(function TradeRowDesktop({
   onDelete,
 }: TradeItemProps & { index: number }) {
   const derivedReturn = tradeReturn(trade);
+  const net = tradeNetResult(trade);
   const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
-  const abstand = trade.entryVix && trade.barrierLevel
+  const abstand = !trade.notes.startsWith("signal:") && trade.entryVix && trade.barrierLevel
     ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100)
     : null;
   const tradeIsOpen = !trade.exitDate;
@@ -305,9 +324,12 @@ const TradeRowDesktop = memo(function TradeRowDesktop({
             )}
           </div>
         ) : derivedReturn !== null ? (
-          <span style={{ color: derivedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {formatPct(derivedReturn)}
-          </span>
+          <div className="whitespace-nowrap">
+            <p style={{ color: derivedReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>{formatPct(derivedReturn)} Kurs</p>
+            {net.afterTax != null && <p className="mt-1 text-muted">{formatEuros(net.afterTax)} nach Steuern</p>}
+            {net.afterTaxReturnPct != null && <p className="text-muted">{formatPct(net.afterTaxReturnPct)} nach Steuern</p>}
+            {net.afterTax == null && net.beforeTax != null && <p className="mt-1 text-muted">{formatEuros(net.beforeTax)} vor Steuern</p>}
+          </div>
         ) : "—"}
       </td>
       <td className="py-3 px-2 text-xs" style={{ color: "#8B8FA8" }}>{holdDaysFromDates(trade.entryDate, trade.exitDate) ?? (trade.exitDate ? "Datum prüfen" : "—")}</td>
@@ -318,14 +340,16 @@ const TradeRowDesktop = memo(function TradeRowDesktop({
         }
       </td>
       <td className="py-3 px-2">
-        <div className="flex gap-1">
-          <button onClick={() => onEdit(trade)} className="rounded-lg p-1.5 transition-colors hover:bg-[#1E1E28]" style={{ color: "#8B8FA8" }}>
+        {trade.notes.startsWith("signal:") ? (
+          <Link href="/signals" className="text-xs text-accent">Signale</Link>
+        ) : <div className="flex gap-1">
+          <button onClick={() => onEdit(trade)} aria-label={`Trade ${trade.certificateId} bearbeiten`} className="rounded-lg p-1.5 transition-colors hover:bg-[#1E1E28]" style={{ color: "#8B8FA8" }}>
             <Pencil size={12} />
           </button>
-          <button onClick={() => onDelete(trade.id)} disabled={isDeleting} className="rounded-lg p-1.5 transition-colors hover:bg-[#FF4D4D22]" style={{ color: "#FF4D4D" }}>
+          <button onClick={() => onDelete(trade.id)} disabled={isDeleting} aria-label={`Trade ${trade.certificateId} löschen`} className="rounded-lg p-1.5 transition-colors hover:bg-[#FF4D4D22]" style={{ color: "#FF4D4D" }}>
             <Trash2 size={12} />
           </button>
-        </div>
+        </div>}
       </td>
     </tr>
   );
@@ -344,14 +368,21 @@ const EMPTY_FORM = {
   ratio: "0.1",
   entryPrice: "",
   exitPrice: "",
+  entryFees: "",
+  exitFees: "",
+  taxWithheld: "",
   quantity: "",
   returnPct: "",
   alertTriggered: false,
   notes: "",
 };
 
+const EMPTY_TRADES: Trade[] = [];
+const optionalAmount = (value: string) => value === "" ? null : Number(value);
+
 export default function TradesPage() {
-  const { data: trades = [], isLoading: loading, error: tradesError, mutate: mutateTrades } = useSWR<Trade[]>("/api/trades");
+  const router = useRouter();
+  const { data: trades = EMPTY_TRADES, isLoading: loading, error: tradesError, mutate: mutateTrades } = useSWR<Trade[]>("/api/trades");
 
   // Live prices for open trades
   const openIsins = useMemo(
@@ -410,14 +441,7 @@ export default function TradesPage() {
     }
   };
 
-  // Auto-calculate returnPct when entry/exit prices change
-  useEffect(() => {
-    const ep = parseFloat(form.entryPrice);
-    const xp = parseFloat(form.exitPrice);
-    if (!isNaN(ep) && ep > 0 && !isNaN(xp) && xp >= 0) {
-      setForm((f) => ({ ...f, returnPct: (((xp - ep) / ep) * 100).toFixed(2) }));
-    }
-  }, [form.entryPrice, form.exitPrice]);
+  const autoReturn = certificateReturn(optionalAmount(form.entryPrice), optionalAmount(form.exitPrice));
 
   const openNew = () => {
     setEditTrade(null);
@@ -440,6 +464,9 @@ export default function TradesPage() {
       ratio: trade.ratio !== null ? String(trade.ratio) : "0.1",
       entryPrice: trade.entryPrice !== null ? String(trade.entryPrice) : "",
       exitPrice: trade.exitPrice !== null ? String(trade.exitPrice) : "",
+      entryFees: trade.entryFees != null ? String(trade.entryFees) : "",
+      exitFees: trade.exitFees != null ? String(trade.exitFees) : "",
+      taxWithheld: trade.taxWithheld != null ? String(trade.taxWithheld) : "",
       quantity: trade.quantity !== null ? String(trade.quantity) : "",
       returnPct: trade.returnPct !== null ? String(trade.returnPct) : "",
       alertTriggered: trade.alertTriggered,
@@ -453,29 +480,33 @@ export default function TradesPage() {
     if (linkedEditHandled.current || !trades.length) return;
     const id = new URLSearchParams(window.location.search).get("edit");
     const trade = trades.find(t => t.id === id);
-    if (trade) {
+    if (!trade) return;
+    const frame = requestAnimationFrame(() => {
       linkedEditHandled.current = true;
-      if (trade.notes.startsWith("signal:")) window.location.assign("/signals");
+      if (trade.notes.startsWith("signal:")) router.replace("/signals");
       else openEdit(trade);
-    }
-  }, [trades, openEdit]);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [trades, openEdit, router]);
 
   const handleSave = async () => {
     if (!/^[A-Z0-9]{12}$/.test(form.certificateId)) {
       setSaveError("ISIN muss genau 12 Zeichen haben (z.B. DE000VU4MAY5)");
       return;
     }
+    if ([form.entryFees, form.exitFees, form.taxWithheld].some(value => value !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+      setSaveError("Gebühren und Steuerabzug müssen nichtnegative Beträge sein.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     const ep = form.entryPrice ? parseFloat(form.entryPrice) : null;
     const xp = form.exitPrice ? parseFloat(form.exitPrice) : null;
-    const autoReturn = ep != null && ep > 0 && xp != null && xp >= 0 ? ((xp - ep) / ep) * 100 : null;
-
     const payload = {
       certificateId: form.certificateId,
       direction: form.direction,
-      entryDate: form.entryDate,
-      exitDate: form.exitDate || null,
+      entryDate: editTrade && form.entryDate === editTrade.entryDate.split("T")[0] ? editTrade.entryDate : form.entryDate,
+      exitDate: editTrade?.exitDate && form.exitDate === editTrade.exitDate.split("T")[0] ? editTrade.exitDate : form.exitDate || null,
       entryVix: form.entryVix ? parseFloat(form.entryVix) : null,
       exitVix: form.exitVix ? parseFloat(form.exitVix) : null,
       barrierLevel: parseFloat(form.barrierLevel),
@@ -484,6 +515,9 @@ export default function TradesPage() {
       ratio: form.ratio ? parseFloat(form.ratio) : null,
       entryPrice: ep,
       exitPrice: xp,
+      entryFees: optionalAmount(form.entryFees),
+      exitFees: form.exitDate ? optionalAmount(form.exitFees) : null,
+      taxWithheld: form.exitDate ? optionalAmount(form.taxWithheld) : null,
       quantity: form.quantity ? parseInt(form.quantity) : null,
       returnPct: autoReturn ?? (form.returnPct ? parseFloat(form.returnPct) : null),
       alertTriggered: form.alertTriggered,
@@ -503,7 +537,8 @@ export default function TradesPage() {
         setModalOpen(false);
       } else {
         const err = await res.json().catch(() => ({}));
-        setSaveError(err?.error ? JSON.stringify(err.error) : `Fehler ${res.status}`);
+        const detail = Array.isArray(err.error) ? err.error[0]?.message : err.error;
+        setSaveError(typeof detail === "string" ? detail : `Speichern fehlgeschlagen (${res.status}).`);
       }
     } catch {
       setSaveError("Netzwerkfehler — Datenbankverbindung prüfen");
@@ -529,54 +564,61 @@ export default function TradesPage() {
   }, []);
 
   const exportCSV = () => {
-    const headers = ["ISIN", "Richtung", "Einstieg", "Ausstieg", "Stück", "Kurs Ein (€)", "Kurs Aus (€)", "Invest. (€)", "VIX Future Ein", "VIX Future Aus", "Barrier (USD)", "Basispreis (USD)", "Hebel", "Bezugsverh.", "Rendite %", "Haltetage", "Alert", "Notizen"];
-    const rows = trades.map((t) => [
-      t.certificateId,
-      t.direction === "long" ? "Long" : "Short",
-      formatDate(t.entryDate),
-      t.exitDate ? formatDate(t.exitDate) : "",
-      t.quantity ?? "",
-      t.entryPrice ?? "",
-      t.exitPrice ?? "",
-      t.entryPrice && t.quantity ? (t.entryPrice * t.quantity).toFixed(2) : "",
-      t.entryVix,
-      t.exitVix ?? "",
-      t.barrierLevel,
-      t.strikePrice ?? "",
-      t.leverageRatio ?? "",
-      t.ratio ?? "",
-      tradeReturn(t) ?? "",
-      holdDaysFromDates(t.entryDate, t.exitDate) ?? "",
-      t.alertTriggered ? "Ja" : "Nein",
-      t.notes,
-    ]);
-    const csv = [headers, ...rows].map((r) => r.join(";")).join("\n");
+    const headers = ["ISIN", "Richtung", "Einstieg", "Ausstieg", "Stück", "Kurs Ein (€)", "Kurs Aus (€)", "Invest. (€)", "VIX Future Ein", "VIX Future Aus", "Barrier (USD)", "Basispreis (USD)", "Hebel", "Bezugsverh.", "Kursrendite %", "Kaufgebühren (€)", "Verkaufsgebühren (€)", "Steuerabzug (€)", "G/V nach Gebühren (€)", "G/V nach Steuern (€)", "Rendite nach Steuern %", "Haltetage", "Alert", "Notizen"];
+    const rows = trades.map((t) => {
+      const net = tradeNetResult(t);
+      return [
+        t.certificateId,
+        t.direction === "long" ? "Long" : "Short",
+        formatDate(t.entryDate),
+        t.exitDate ? formatDate(t.exitDate) : "",
+        t.quantity ?? "",
+        t.entryPrice ?? "",
+        t.exitPrice ?? "",
+        t.entryPrice && t.quantity ? (t.entryPrice * t.quantity).toFixed(2) : "",
+        t.entryVix,
+        t.exitVix ?? "",
+        t.barrierLevel,
+        t.strikePrice ?? "",
+        t.leverageRatio ?? "",
+        t.ratio ?? "",
+        tradeReturn(t) ?? "",
+        t.entryFees ?? "",
+        t.exitFees ?? "",
+        t.taxWithheld ?? "",
+        net.beforeTax != null ? Number(net.beforeTax.toFixed(2)) : "",
+        net.afterTax != null ? Number(net.afterTax.toFixed(2)) : "",
+        net.afterTaxReturnPct != null ? Number(net.afterTaxReturnPct.toFixed(2)) : "",
+        holdDaysFromDates(t.entryDate, t.exitDate) ?? "",
+        t.alertTriggered ? "Ja" : "Nein",
+        t.notes,
+      ];
+    });
+    const csvCell = (value: string | number) => {
+      const text = typeof value === "string" && /^\s*[=+@\-\t\r]/.test(value) ? `'${value}` : String(value);
+      return `"${text.replaceAll('"', '""')}"`;
+    };
+    const csv = [headers, ...rows].map((row) => row.map(csvCell).join(";")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `trades_${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  // Summary statistics — memoized so they only recompute when trades array changes
-  const { closedTrades, openTrades, avgReturn, winRate, totalInvested, avgHoldDays, totalPnL, metrics } =
-    useMemo(() => {
-      const closed = trades.filter((t) => t.exitDate);
-      const open = trades.filter((t) => !t.exitDate);
-      const metrics = calcPerformanceMetrics(trades);
-      const invested = open.reduce((sum, t) => sum + (t.entryPrice != null && t.entryPrice > 0 && t.quantity != null && t.quantity > 0 ? t.entryPrice * t.quantity : 0), 0);
-      return {
-        closedTrades: closed,
-        openTrades: open,
-        avgReturn: metrics.avgReturn,
-        winRate: metrics.winRate,
-        totalInvested: invested,
-        avgHoldDays: metrics.avgHoldDays,
-        totalPnL: metrics.totalPnlEur,
-        metrics,
-      };
-    }, [trades]);
+  const { openTrades, metrics, entryAnalysis } = useMemo(() => ({
+    openTrades: trades.filter((trade) => !trade.exitDate),
+    metrics: calcPerformanceMetrics(trades),
+    entryAnalysis: analyzeEntryLevels(trades),
+  }), [trades]);
+
+  useEffect(() => {
+    if (!loading && window.location.hash === "#auswertung") {
+      document.getElementById("auswertung")?.scrollIntoView();
+    }
+  }, [loading]);
 
   // Live preview calculations in form
   const formInvestment =
@@ -589,10 +631,16 @@ export default function TradesPage() {
       ? (((parseFloat(form.entryVix) - parseFloat(form.barrierLevel)) / parseFloat(form.entryVix)) * 100).toFixed(1)
       : null;
 
-  const formPnL =
-    form.entryPrice && form.exitPrice && form.quantity
-      ? ((parseFloat(form.exitPrice) - parseFloat(form.entryPrice)) * parseInt(form.quantity)).toFixed(2)
-      : null;
+  const formNet = tradeNetResult({
+    entryDate: form.entryDate,
+    exitDate: form.exitDate,
+    entryPrice: optionalAmount(form.entryPrice),
+    exitPrice: optionalAmount(form.exitPrice),
+    quantity: optionalAmount(form.quantity),
+    entryFees: optionalAmount(form.entryFees),
+    exitFees: optionalAmount(form.exitFees),
+    taxWithheld: optionalAmount(form.taxWithheld),
+  });
 
   return (
     <div className="p-4 lg:p-6 space-y-4 lg:space-y-6">
@@ -600,9 +648,7 @@ export default function TradesPage() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Trades</h1>
-          <p className="text-sm mt-0.5" style={{ color: "#8B8FA8" }}>
-            {trades.length} Trades gesamt
-          </p>
+          <p className="mt-1 text-sm text-muted">{openTrades.length} offen · {metrics.closedTrades} abgeschlossen</p>
         </div>
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={exportCSV}>
@@ -616,12 +662,17 @@ export default function TradesPage() {
         </div>
       </div>
 
+      <nav aria-label="Trade-Bereiche" className="flex gap-4 border-b border-border pb-3 text-sm">
+        <a href="#historie" className="text-accent hover:underline">Trade-Historie</a>
+        <a href="#auswertung" className="text-accent hover:underline">Auswertung</a>
+      </nav>
+
       {/* ===== MOBILE: Open Position Hero Card ===== */}
       {!loading && openTrades.length > 0 && (
         <div className="lg:hidden space-y-2.5">
           {openTrades.map((trade) => {
             const investment = trade.entryPrice && trade.quantity ? trade.entryPrice * trade.quantity : null;
-            const abstand = trade.entryVix && trade.barrierLevel
+            const abstand = !trade.notes.startsWith("signal:") && trade.entryVix && trade.barrierLevel
               ? ((trade.direction === "short" ? trade.barrierLevel - trade.entryVix : trade.entryVix - trade.barrierLevel) / trade.entryVix * 100) : null;
             const livePrice = livePrices[trade.certificateId];
             const bid = livePrice?.bid ?? null;
@@ -718,13 +769,15 @@ export default function TradesPage() {
                   <span className="text-[10px]" style={{ color: "#8B8FA8" }}>
                     {formatDate(trade.entryDate)} · {trade.quantity} Stück · VIX {formatNumber(trade.entryVix)}
                   </span>
-                  <button
+                  {trade.notes.startsWith("signal:") ? (
+                    <Link href="/signals" className="text-xs font-medium text-accent">Zu den Signalen</Link>
+                  ) : <button
                     onClick={() => openEdit(trade)}
                     className="text-[10px] font-medium px-2 py-1 rounded-lg"
                     style={{ background: "#1E1E28", color: "#B8E15A" }}
                   >
                     Bearbeiten
-                  </button>
+                  </button>}
                 </div>
               </div>
             );
@@ -732,129 +785,90 @@ export default function TradesPage() {
         </div>
       )}
 
-      {metrics.invalidDateTrades > 0 && <p className="text-xs text-[#F59E0B]">{metrics.invalidDateTrades} Trade(s) mit Ausstieg vor Einstieg oder ungültigem Datum von Kennzahlen ausgeschlossen. Historische Einträge bleiben unverändert.</p>}
-      <p className="text-xs text-[#8B8FA8]">Zertifikatsrenditen und G/V vor Gebühren; kein Depotwert.</p>
-      {deleteError && <p role="alert" className="mb-4 text-sm text-red-400">{deleteError}</p>}
-      {tradesError && <p className="text-sm text-[#F59E0B]">Trades konnten nicht geladen werden. Angezeigte ältere Werte können veraltet sein.</p>}
-      {/* Summary Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Offene Trades</div>
-          <div className="text-2xl font-bold text-white">{openTrades.length}</div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Geschlossene</div>
-          <div className="text-2xl font-bold text-white">{closedTrades.length}</div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Win Rate</div>
-          <div className="text-2xl font-bold" style={{ color: winRate >= 0.5 ? "#22C55E" : "#FF4D4D" }}>
-            {metrics.analyzedTrades ? `${(winRate * 100).toFixed(0)}%` : "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Rendite</div>
-          <div className="text-2xl font-bold" style={{ color: avgReturn >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {metrics.analyzedTrades ? formatPct(avgReturn) : "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Rendite auswertbar</div>
-          <div className="text-2xl font-bold text-white">{metrics.analyzedTrades} / {metrics.closedTrades}</div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Realisierter G/V (brutto)</div>
-          <div className="text-2xl font-bold" style={{ color: totalPnL >= 0 ? "#22C55E" : "#FF4D4D" }}>
-            {metrics.tradesWithEurData > 0 ? `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(0)} €` : "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Ø Haltetage</div>
-          <div className="text-2xl font-bold text-white">
-            {closedTrades.length > metrics.invalidDateTrades ? avgHoldDays.toFixed(1) : "—"}
-          </div>
-        </Card>
-        <Card>
-          <div className="text-xs mb-1" style={{ color: "#8B8FA8" }}>Investiert (offen)</div>
-          <div className="text-2xl font-bold text-white">
-            {totalInvested > 0 ? `${totalInvested.toFixed(0)} €` : "—"}
-          </div>
-        </Card>
-      </div>
+      {deleteError && <p role="alert" className="text-sm text-danger">{deleteError}</p>}
+      {tradesError && <p role="alert" className="text-sm text-warning">Trades konnten nicht aktualisiert werden. Angezeigte ältere Werte können veraltet sein.</p>}
+      <section id="historie" aria-labelledby="historie-heading" className="scroll-mt-20 space-y-3 lg:scroll-mt-6">
+        <h2 id="historie-heading" className="text-xl font-semibold text-white">Trade-Historie</h2>
 
-      {/* ===== MOBILE: Trade Cards ===== */}
-      <div className="lg:hidden space-y-2.5">
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
-          </div>
-        ) : trades.length === 0 ? (
-          <div className="py-12 text-center rounded-2xl" style={{ background: "#141418", border: "1px solid #1E1E28" }}>
-            <p style={{ color: "#8B8FA8" }} className="mb-3 text-sm">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
-            <Button variant="primary" size="sm" onClick={openNew}>
-              <Plus size={14} />
-              Ersten Trade anlegen
-            </Button>
-          </div>
-        ) : (
-          trades.map((trade) => (
-            <TradeCardMobile
-              key={`mob-${trade.id}`}
-              trade={trade}
-              liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
-              isExpanded={expandedTrade === trade.id}
-              isDeleting={deleting === trade.id}
-              onToggle={toggleExpanded}
-              onEdit={openEdit}
-              onDelete={handleDelete}
-            />
-          ))
-        )}
-      </div>
+        {/* ===== MOBILE: Trade Cards ===== */}
+        <div className="lg:hidden space-y-2.5">
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
+            </div>
+          ) : trades.length === 0 ? (
+            <div className="py-12 text-center rounded-2xl" style={{ background: "#141418", border: "1px solid #1E1E28" }}>
+              <p style={{ color: "#8B8FA8" }} className="mb-3 text-sm">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
+              <Button variant="primary" size="sm" onClick={openNew}>
+                <Plus size={14} />
+                Ersten Trade anlegen
+              </Button>
+            </div>
+          ) : (
+            trades.map((trade) => (
+              <TradeCardMobile
+                key={`mob-${trade.id}`}
+                trade={trade}
+                liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
+                isExpanded={expandedTrade === trade.id}
+                isDeleting={deleting === trade.id}
+                onToggle={toggleExpanded}
+                onEdit={openEdit}
+                onDelete={handleDelete}
+              />
+            ))
+          )}
+        </div>
 
-      {/* ===== DESKTOP: Trade Table ===== */}
-      <Card className="hidden lg:block">
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
-          </div>
-        ) : trades.length === 0 ? (
-          <div className="py-12 text-center">
-            <p style={{ color: "#8B8FA8" }} className="mb-3">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
-            <Button variant="primary" size="sm" onClick={openNew}>
-              <Plus size={14} />
-              Ersten Trade anlegen
-            </Button>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b" style={{ borderColor: "#1E1E28" }}>
-                  {["ISIN", "Richtung", "Datum", "Status", "Stück", "Kurs Ein", "Kurs Aus", "Invest.", "VIX Fut.", "Barrier", "Basis", "Hebel", "Rendite", "Tage", "🔔", ""].map((h) => (
-                    <th key={h} className="py-3 px-2 text-left font-medium text-xs whitespace-nowrap" style={{ color: "#8B8FA8" }}>
-                      {h}
-                    </th>
+        {/* ===== DESKTOP: Trade Table ===== */}
+        <Card className="hidden lg:block">
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#B8E15A] border-t-transparent" />
+            </div>
+          ) : trades.length === 0 ? (
+            <div className="py-12 text-center">
+              <p style={{ color: "#8B8FA8" }} className="mb-3">{tradesError ? "Trades konnten nicht geladen werden" : "Noch keine Trades erfasst"}</p>
+              <Button variant="primary" size="sm" onClick={openNew}>
+                <Plus size={14} />
+                Ersten Trade anlegen
+              </Button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "#1E1E28" }}>
+                    {["ISIN", "Richtung", "Datum", "Status", "Stück", "Kurs Ein", "Kurs Aus", "Invest.", "VIX / VX", "Barrier", "Basis", "Hebel", "Rendite", "Tage", "🔔", ""].map((h) => (
+                      <th key={h} className="py-3 px-2 text-left font-medium text-xs whitespace-nowrap" style={{ color: "#8B8FA8" }}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.map((trade, i) => (
+                    <TradeRowDesktop
+                      key={trade.id}
+                      trade={trade}
+                      index={i}
+                      liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
+                      isDeleting={deleting === trade.id}
+                      onEdit={openEdit}
+                      onDelete={handleDelete}
+                    />
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((trade, i) => (
-                  <TradeRowDesktop
-                    key={trade.id}
-                    trade={trade}
-                    index={i}
-                    liveBid={!trade.exitDate ? (livePrices[trade.certificateId]?.bid ?? null) : null}
-                    isDeleting={deleting === trade.id}
-                    onEdit={openEdit}
-                    onDelete={handleDelete}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </section>
+
+      <section id="auswertung" aria-label="Auswertung" className="scroll-mt-20 lg:scroll-mt-6">
+        {loading ? <p role="status" className="text-sm text-muted">Auswertung wird geladen …</p> :
+          (!tradesError || trades.length > 0) && <TradePerformance metrics={metrics} entryAnalysis={entryAnalysis} />}
+      </section>
 
       {/* Trade Modal */}
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editTrade ? "Trade bearbeiten" : "Neuer Trade"} size="lg">
@@ -1013,10 +1027,19 @@ export default function TradesPage() {
               onChange={(e) => setForm({ ...form, quantity: e.target.value })}
               placeholder="z.B. 500"
             />
+            <Input
+              label="Kaufgebühren (EUR)"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.entryFees}
+              onChange={(event) => setForm({ ...form, entryFees: event.target.value })}
+              placeholder="Leer, wenn unbekannt"
+            />
           </div>
           {/* Gesamtinvestition */}
           <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-lg px-4 py-3 text-sm flex items-center justify-between col-span-2" style={{ background: "#1E1E28", color: "#8B8FA8" }}>
+            <div className="rounded-lg px-4 py-3 text-sm flex items-center justify-between md:col-span-2" style={{ background: "#1E1E28", color: "#8B8FA8" }}>
               <span className="flex items-center gap-2">
                 <TrendingUp size={14} />
                 Gesamtinvestition
@@ -1063,21 +1086,45 @@ export default function TradesPage() {
               placeholder="leer lassen wenn offen"
             />
           </div>
-          {/* P&L preview */}
-          {formPnL !== null && (
-            <div className="mt-3 rounded-lg px-4 py-3 text-sm flex items-center justify-between" style={{ background: "#1E1E28" }}>
-              <span style={{ color: "#8B8FA8" }}>Realisierter P&amp;L</span>
-              <span className="font-semibold" style={{ color: parseFloat(formPnL) >= 0 ? "#22C55E" : "#FF4D4D" }}>
-                {parseFloat(formPnL) >= 0 ? "+" : ""}{formPnL} €
-              </span>
-            </div>
+          {form.exitDate && (
+            <>
+              <div className="mt-3 grid gap-4 md:grid-cols-2">
+                <Input
+                  label="Verkaufsgebühren (EUR)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.exitFees}
+                  onChange={(event) => setForm({ ...form, exitFees: event.target.value })}
+                  placeholder="Leer, wenn unbekannt"
+                />
+                <Input
+                  label="Einbehaltene Steuern (EUR)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.taxWithheld}
+                  onChange={(event) => setForm({ ...form, taxWithheld: event.target.value })}
+                  placeholder="Leer, wenn unbekannt"
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted">Steuerabzug laut Brokerabrechnung insgesamt. 0 € eintragen, wenn der Broker bestätigt keinen Betrag einbehalten hat.</p>
+              {formNet.gross != null && (
+                <dl className="mt-3 grid grid-cols-2 gap-3 rounded-lg bg-surface-2 p-4 text-sm">
+                  <dt className="text-muted">Vor Gebühren</dt><dd className="text-right text-white">{formatEuros(formNet.gross)}</dd>
+                  <dt className="text-muted">Nach Gebühren</dt><dd className="text-right text-white">{formatEuros(formNet.beforeTax)}</dd>
+                  <dt className="text-muted">Nach Steuern</dt><dd className="text-right text-white">{formatEuros(formNet.afterTax)}{formNet.afterTaxReturnPct != null && ` · ${formatPct(formNet.afterTaxReturnPct)}`}</dd>
+                </dl>
+              )}
+            </>
           )}
           <div className="mt-3">
             <Input
-              label="Rendite %"
+              label="Kursrendite %"
               type="number"
               step="0.01"
-              value={form.returnPct}
+              value={autoReturn?.toFixed(2) ?? form.returnPct}
+              readOnly={autoReturn != null}
               onChange={(e) => setForm({ ...form, returnPct: e.target.value })}
               placeholder="wird auto-berechnet aus Kursen"
             />
@@ -1097,7 +1144,7 @@ export default function TradesPage() {
               Durch Alert ausgelöst
             </label>
           </div>
-          <div className="col-span-2">
+          <div className="md:col-span-2">
             <Textarea
               label="Notizen"
               value={form.notes}

@@ -25,7 +25,10 @@ export async function loadQuote(cfg: Config): Promise<Quote> {
     validIsin ? trackedVontobel(`https://markets.vontobel.com/api/v1/charts/products/${cfg.isin}/detail/0?c=de-de`, {
       headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' }, cache: 'no-store', signal: AbortSignal.timeout(12000),
     }).then(async r => { if (!r.ok) throw new Error('Kursquelle nicht verfügbar'); return r.json(); }) : Promise.resolve(null),
-    validIsin ? trackedVontobel(`https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${cfg.isin}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }).then(r => r.text()) : Promise.resolve(''),
+    validIsin ? trackedVontobel(`https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${cfg.isin}`, { cache: 'no-store', signal: AbortSignal.timeout(12000) }, cfg).then(r => {
+      if (!r.ok) throw new Error('Emittentenstatus nicht verfügbar');
+      return r.text();
+    }) : Promise.resolve(''),
   ]);
   const vix = spot.status === 'fulfilled' ? spot.value : null;
   const series: Series[] = chart.status === 'fulfilled' && Array.isArray(chart.value?.payload?.series) ? chart.value.payload.series : [];

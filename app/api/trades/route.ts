@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
-import { createTradeSchema, tradeDerivedValues } from "@/lib/trade-validation";
+import { createTradeSchema, tradeDerivedValues, validateTradeClosingCosts } from "@/lib/trade-validation";
 
 export async function GET() {
   try {
@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
     const parsed = createTradeSchema.parse(body);
     const entryDate = new Date(parsed.entryDate);
     const exitDate = parsed.exitDate ? new Date(parsed.exitDate) : null;
+    validateTradeClosingCosts(exitDate, parsed);
     const derived = tradeDerivedValues({ ...parsed, entryDate, exitDate });
     const trade = await prisma.$transaction(async (tx) => {
       let positionId = parsed.positionId;

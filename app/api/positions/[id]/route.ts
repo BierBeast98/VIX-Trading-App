@@ -51,8 +51,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       }
       // Validate every entry before performing any write.
       const updates = openTrades.map(t => ({ trade: t, derived: tradeDerivedValues({ ...t, exitDate, exitPrice: parsed.exitPrice }) }));
+      let previousQuantity = 0;
+      const allocated = (amount: number | null | undefined, from: number, to: number) =>
+        amount == null ? amount :
+          (Math.round(amount * 100 * to / parsed.quantity) - Math.round(amount * 100 * from / parsed.quantity)) / 100;
       for (const { trade, derived } of updates) {
-        await tx.trade.update({ where: { id: trade.id }, data: { exitDate, exitPrice: parsed.exitPrice, ...derived } });
+        const cumulativeQuantity = previousQuantity + trade.quantity!;
+        await tx.trade.update({ where: { id: trade.id }, data: {
+          exitDate, exitPrice: parsed.exitPrice,
+          exitFees: allocated(parsed.exitFees, previousQuantity, cumulativeQuantity),
+          taxWithheld: allocated(parsed.taxWithheld, previousQuantity, cumulativeQuantity),
+          ...derived,
+        } });
+        previousQuantity = cumulativeQuantity;
       }
       await tx.position.update({ where: { id }, data: { status: "closed", currentPrice: parsed.exitPrice } });
       return openTrades.length;

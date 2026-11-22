@@ -27,3 +27,50 @@ test('Massive and Yahoo VIX observations remain separate even at the same timest
 });
 
 test('Yahoo VIX quote remains explicitly delayed even when source timestamp looks fresh',()=>{const row=yahooSamples('^VIX','quote',{regularMarketPrice:20,regularMarketTime:at})[0];assert.equal(row.quality,'delayed');assert.equal(row.metadata.delayMinutes,15);assert.equal(quality(row,at),'delayed');});
+
+const { strategyIssuerSamples } = require('../lib/archive/strategy-samples.ts');
+const archiveTarget = { isin: 'DE000BD11R44', productVerified: true, futureSymbol: 'UXZ6', futureExpiry: '2026-12-16', barrier: 12.1 };
+const issuer = {
+ data: { isin: archiveTarget.isin, isActive: true, currency: 'EUR', direction: 1, stopLoss: 12.2, strikePrice: 10.7 },
+ price: { bid: 1, ask: 1.05, bidTimestamp: '2026-11-17T13:59:51Z', askTimestamp: '2026-11-17T13:59:52Z' },
+ underlyings: [{ symbol: 'UXZ6', price: { latest: 17, latestTimestamp: '2026-11-17T13:59:53Z', currency: 'USD' } }],
+};
+test('strategy snapshots carry verified contract expiry, separate issuer bid/ask times and actual barrier', () => {
+ const [status, certificate, vx] = strategyIssuerSamples(archiveTarget, issuer);
+ assert.equal(status.metadata.status, 'active'); assert.equal(status.metadata.barrier, 12.2);
+ assert.equal(status.metadata.configuredBarrier, 12.1);
+ assert.equal(status.sourceAt, undefined);
+ assert.equal(certificate.sourceAt, '2026-11-17T13:59:51.000Z');
+ assert.equal(certificate.metadata.askSourceAt, '2026-11-17T13:59:52.000Z');
+ assert.equal(vx.kind, 'strategy_vx_quote'); assert.equal(vx.contract, 'UXZ6');
+ assert.equal(vx.metadata.futureExpiry, '2026-12-16');
+});
+test('rollover preserves genuine certificate observations and omits unverified VX price or expiry', () => {
+ const [status, certificate, ...extra] = strategyIssuerSamples(archiveTarget, {
+  ...issuer, underlyings: [{ ...issuer.underlyings[0], symbol: 'UXF7' }],
+ });
+ assert.equal(status.metadata.status, 'mapping_mismatch');
+ assert.equal(certificate.contract, null); assert.equal(certificate.metadata.futureExpiry, null);
+ assert.equal(certificate.bid, 1); assert.equal(extra.length, 0);
+});
+test('inactive and unavailable issuer statuses never retain displayed legacy prices', () => {
+ const inactive = strategyIssuerSamples(archiveTarget, { ...issuer, data: { ...issuer.data, isActive: false } });
+ assert.deepEqual(inactive.map(sample => sample.metadata.status), ['inactive']);
+ assert.deepEqual(strategyIssuerSamples(archiveTarget, null).map(sample => sample.metadata.status), ['unavailable']);
+ assert.deepEqual(strategyIssuerSamples({ ...archiveTarget, productVerified: false }, issuer), []);
+});
+test('quoted sides without issuer timestamps are not assigned a timestamp from another side', () => {
+ const samples = strategyIssuerSamples(archiveTarget, { ...issuer, price: { ...issuer.price, askTimestamp: undefined } });
+ assert.equal(samples[1].bid, 1);
+ assert.equal(samples[1].ask, null);
+ assert.equal(samples[1].metadata.askSourceAt, null);
+});
+test('manually held Vontobel certificates keep dated quotes without certifying a VX mapping', () => {
+ const [status, certificate, ...extra] = strategyIssuerSamples({ isin: archiveTarget.isin, held: true }, issuer);
+ assert.equal(status.metadata.status, 'active_unmapped');
+ assert.equal(certificate.metadata.observedSymbol, 'UXZ6');
+ assert.equal(certificate.metadata.mappingVerified, false);
+ assert.equal(certificate.contract, null);
+ assert.equal(extra.length, 0);
+ assert.deepEqual(strategyIssuerSamples({ isin:'DE000BD11R45', held: true }, issuer), []);
+});

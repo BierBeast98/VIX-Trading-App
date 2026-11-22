@@ -4,8 +4,13 @@ import { z } from 'zod';
 import { allowed, sameOrigin } from '@/lib/signals/auth';
 import { changeState, readState } from '@/lib/signals/store';
 import { prisma } from '@/lib/prisma';
+import { entryLevels, notificationLevels } from '@/lib/signals/engine';
 export const dynamic = 'force-dynamic';
+const level = z.number().finite().positive();
+const levelSchema = z.tuple([level, level, level]).refine(([first, second, third]) => first > second && second > third);
+const sameLevels = (a: readonly number[], b: readonly number[]) => a.every((level, index) => level === b[index]);
 const configSchema = z.object({
+  entryLevels: levelSchema.optional(), notificationLevels: levelSchema.optional(),
   vixEntryPolicy: z.enum(['realtime', 'delayed20']).optional(),
   enabled: z.boolean(), capital: z.number().finite().min(1).max(100000000),
   variant: z.enum(['A', 'B', 'C']), leverage: z.union([z.literal(1.5), z.literal(1.9), z.literal(2), z.literal(2.3)]),
@@ -34,17 +39,45 @@ export async function PUT(req: NextRequest) {
   if (!allowed(req) || !sameOrigin(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const config = configSchema.parse(await req.json());
-    if (config.enabled && (!config.broker || !config.opensAt || !config.closesAt || config.opensAt >= config.closesAt || !config.productVerified || !config.isin || !config.futureSymbol || !config.futureExpiry || !config.futureName || config.barrier <= 0 || (!config.email && !config.telegram))) throw new Error('Brokerzeiten, geprüftes Long-Produkt, VX-Basisvertrag und mindestens einen Versandkanal einrichten');
+    if (config.enabled && (!config.broker || !config.opensAt || !config.closesAt || config.opensAt >= config.closesAt || (!config.email && !config.telegram))) throw new Error('Für die Überwachung Brokerzeiten und mindestens einen Versandkanal einrichten');
+    if (config.productVerified && (!config.isin || !config.futureSymbol || !config.futureExpiry || !config.futureName || config.barrier <= 0)) throw new Error('Für das geprüfte Long-Produkt ISIN, Knock-out-Barriere und VX-Basisvertrag ergänzen');
     const result = await changeState(async (state, tx) => {
-      config.vixEntryPolicy ??= state.config.vixEntryPolicy ?? 'realtime';
+      const previous = state.config;
+      config.vixEntryPolicy ??= previous.vixEntryPolicy ?? 'realtime';
+      config.entryLevels ??= [...entryLevels(previous)];
+      config.notificationLevels ??= [...notificationLevels(previous)];
+      const entriesChanged = !sameLevels(entryLevels(previous), config.entryLevels);
+      const notificationsChanged = !sameLevels(notificationLevels(previous), config.notificationLevels);
       const provider = process.env.VIX_DATA_PROVIDER?.trim() || (process.env.MASSIVE_API_KEY?.trim() ? 'massive' : 'yahoo');
       if (config.enabled && (!state.config.enabled || config.vixEntryPolicy !== (state.config.vixEntryPolicy ?? 'realtime')) && config.vixEntryPolicy !== 'delayed20' && (provider !== 'massive' || !process.env.MASSIVE_API_KEY?.trim())) throw new Error('Vor Aktivierung ist ein VIX-Echtzeitzugang erforderlich. Der verzögerte Yahoo-Kurs genügt nicht.');
       const baseline = await tx.vixCache.findUnique({ where: { id: 'account_capital' } });
       if ((baseline?.data as { source?: string } | null)?.source === 'strategy-baseline' && config.capital !== state.config.capital) throw new Error('Strategiekapital wird aus der bestätigten Kapitalbasis und den Ausführungen fortgeschrieben. Ein-/Auszahlungen bitte zuerst abstimmen.');
       const locked = state.round || state.signals.some(s => s.status === 'pending');
       const keys = ['vixEntryPolicy', 'capital', 'variant', 'leverage', 'isin', 'wkn', 'futureSymbol', 'futureName', 'futureExpiry', 'productVerified', 'barrier'] as const;
-      if (locked && keys.some(k => k === 'vixEntryPolicy' ? (config[k] ?? 'realtime') !== (state.config[k] ?? 'realtime') : config[k] !== state.config[k])) throw new Error('Strategie und Produkt sind bei offener Runde oder offenem Signal gesperrt');
-      if (state.config.enabled !== config.enabled || (state.config.vixEntryPolicy ?? 'realtime') !== config.vixEntryPolicy) { state.previousVix = null; state.previousVixAt = null; state.armed = false; }
+      const lockedSettingsChanged = keys.some(key => key === 'vixEntryPolicy'
+        ? config[key] !== (previous[key] ?? 'realtime')
+        : config[key] !== previous[key]);
+      if (locked && (entriesChanged || lockedSettingsChanged)) throw new Error('Handelsstrategie und Prüfprodukt sind bei offener Runde oder offenem Signal gesperrt');
+      if (previous.enabled !== config.enabled || (previous.vixEntryPolicy ?? 'realtime') !== config.vixEntryPolicy || entriesChanged || previous.isin !== config.isin || previous.futureSymbol !== config.futureSymbol) {
+        state.previousVix = null;
+        state.previousVixAt = null;
+        state.armed = false;
+      }
+      if (previous.isin !== config.isin || previous.futureSymbol !== config.futureSymbol ||
+          previous.futureExpiry !== config.futureExpiry || previous.productVerified !== config.productVerified) state.quote = null;
+      if (notificationsChanged && state.levels) {
+        // Keep the last source timestamp. Newly configured levels wait for a new observation.
+        state.levels.below = state.levels.below.filter(level => config.notificationLevels!.includes(level));
+      }
+      if (lockedSettingsChanged || entriesChanged || notificationsChanged ||
+          previous.enabled !== config.enabled || previous.email !== config.email || previous.telegram !== config.telegram ||
+          previous.broker !== config.broker || previous.opensAt !== config.opensAt ||
+          previous.closesAt !== config.closesAt || previous.closedDates.join() !== config.closedDates.join()) {
+        await tx.vixCache.create({ data: {
+          id: `manual_strategy_config_change:${crypto.randomUUID()}`,
+          data: { at: new Date().toISOString(), previous, config },
+        } });
+      }
       state.config = config;
       state.health = config.enabled ? 'Bereit für nächsten serverseitigen Prüflauf' : 'Überwachung pausiert';
       return { state, result: state };

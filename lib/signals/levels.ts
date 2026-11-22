@@ -1,17 +1,17 @@
-import { entryVixUsable, marketOpen, type Quote, type State } from './engine';
+import { DEFAULT_VIX_LEVELS, entryVixUsable, marketOpen, notificationLevels, type Quote, type State } from './engine';
 export type LevelEvent = {
   id: string; at: string; levels: number[]; value: number; sourceAt: string;
   source: string; delayed: boolean;
   notification: Partial<Record<'telegram' | 'email', { sentAt?: string; error?: string; leaseAt?: string }>>;
 };
 export type LevelState = { sourceAt: string | null; below: number[]; events: LevelEvent[] };
-export const LEVELS = [15.5, 14.5, 13.5];
+export const LEVELS = DEFAULT_VIX_LEVELS;
 /** Level observations are independent of product eligibility and never create orders or fills. */
 export function evaluateLevels(state: State, quote: Quote, now: Date): void {
   if (!state.config.enabled || !marketOpen(state.config, now) || !entryVixUsable(state.config, quote, now)) return;
   const levels = state.levels ??= { sourceAt: null, below: [], events: [] };
   if (levels.sourceAt && Date.parse(quote.vixAt!) <= Date.parse(levels.sourceAt)) return;
-  const below = LEVELS.filter(level => quote.vix! <= level);
+  const below = notificationLevels(state.config).filter(level => quote.vix! <= level);
   const reached = below.filter(level => !levels.below.includes(level));
   levels.sourceAt = quote.vixAt;
   levels.below = below;

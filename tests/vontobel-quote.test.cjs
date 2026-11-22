@@ -9,3 +9,17 @@ test('undated snapshot prices are not made fresh by retrieval time', () => { con
 test('genuine bid chart fallback never invents an ask', () => { const m=meta(); delete m.price; const q=issuerQuote(cfg,m,[{ isProduct:true,points:[{timestamp:1794922200000,bid:.93}] }]); assert.equal(q.bid,.93); assert.equal(q.ask,null); });
 test('roll mismatch, inactive, short and non-EUR products are rejected', () => { for(const change of ['roll','inactive','short','currency']) { const m=meta(); if(change==='roll')m.underlyings[0].symbol='UXF7'; if(change==='inactive')m.data.isActive=false; if(change==='short')m.data.direction=2; if(change==='currency')m.data.currency='USD'; assert.equal(issuerQuote(cfg,m,[]).productValid,false); } });
 test('December expiry on 16 December fails the unchanged 30-day entry rule on 17 November', () => { let s=initialState(); s.config={...s.config,...cfg,enabled:true,capital:1500,leverage:2,productVerified:true,barrier:12.1,futureName:'VX Dec 2026',futureExpiry:'2026-12-16',broker:'comdirect / Stuttgart',opensAt:'08:00',closesAt:'22:00'}; s.previousVix=16;s.previousVixAt='2026-11-17T13:38:00Z';s.armed=true;const now=new Date('2026-11-17T13:39:00Z');const q={...issuerQuote(s.config,meta(),[]),isin:cfg.isin,at:now.toISOString(),vix:15,vixRealtime:true,vixAt:now.toISOString(),future:16};s=evaluate(s,q,now);assert.equal(s.signals.length,0);assert.match(s.health,/Restlaufzeit/); });
+
+test('status distinguishes confirmed inactivity, unavailable metadata and changed contract mapping', () => {
+  const inactive = meta();
+  inactive.data.isActive = false;
+  assert.equal(issuerQuote(cfg, inactive, []).issuerStatus, 'inactive');
+  assert.equal(issuerQuote(cfg, null, []).issuerStatus, 'unavailable');
+  const different = meta();
+  different.underlyings[0].symbol = 'UXF7';
+  assert.equal(issuerQuote(cfg, different, []).issuerStatus, 'mismatch');
+  assert.equal(issuerQuote(cfg, different, []).bid, .93);
+  const noSnapshot = meta();
+  delete noSnapshot.underlyings[0].price;
+  assert.equal(issuerQuote(cfg, noSnapshot, [{ isProduct: false, points: [{ timestamp: 1794922200000, close: 15 }] }]).future, null);
+});

@@ -27,11 +27,17 @@ test('transactional fills, concurrent retries, trade/position sync and rollback'
     s.signals[0].at = '2026-10-19T15:00:00Z';
     const sellId = s.signals[0].id;
     await changeState(async () => ({ state: s, result: undefined }));
-    await recordFill({ signalId: sellId, action: 'execute', quantity: 239, price: 9.5, fees: 5, at: now.toISOString() });
+    await recordFill({ signalId: sellId, action: 'execute', quantity: 239, price: 9.5, fees: 5, taxWithheld: 0, at: now.toISOString() });
     s = await readState(); assert.equal(s.round.lots[0].quantity, 60);
     assert.equal(await prisma.trade.count({ where: { exitDate: null } }), 1);
     assert.equal(await prisma.trade.count({ where: { exitDate: { not: null } } }), 1);
-    assert.equal((await prisma.trade.findUnique({ where: { id: s.round.lots[0].tradeId } })).quantity, 60);
+    const remainingTrade = await prisma.trade.findUnique({ where: { id: s.round.lots[0].tradeId } });
+    const partialTrade = await prisma.trade.findFirst({ where: { exitDate: { not: null } } });
+    assert.equal(remainingTrade.quantity, 60);
+    assert.equal(remainingTrade.entryFees, 1);
+    assert.equal(partialTrade.entryFees, 4);
+    assert.equal(partialTrade.exitFees, 5);
+    assert.equal(partialTrade.taxWithheld, 0);
     assert.equal(await prisma.position.count({ where: { status: 'open' } }), 1);
     const end = new Date('2026-11-09T15:00:00Z'); s = evaluate(s, quote(15, end, 9.5), end); s.signals[0].at = now.toISOString();
     await changeState(async () => ({ state: s, result: undefined }));
@@ -52,5 +58,27 @@ test('transactional fills, concurrent retries, trade/position sync and rollback'
     await Promise.all([changeState(async x => { x.config.capital += 1; return { state: x, result: undefined }; }), changeState(async x => { x.config.capital += 1; return { state: x, result: undefined }; })]);
     assert.equal((await readState()).config.capital, s.config.capital + 2);
     assert.equal((await readState()).executions.length, count);
+
+    let next = initialState();
+    next.config = config;
+    next = evaluate(evaluate(next, quote(16, early), early), quote(15, now), now);
+    await changeState(async () => ({ state: next, result: undefined }));
+    next = await recordFill({ ...fill, signalId: next.signals[0].id });
+    const addedAt = new Date(now.getTime() + 60_000);
+    next = evaluate(next, quote(14, addedAt), addedAt);
+    await changeState(async () => ({ state: next, result: undefined }));
+    next = await recordFill({ ...fill, signalId: next.signals[0].id, quantity: 100, at: addedAt.toISOString() });
+    const lotIds = next.round.lots.map(lot => lot.tradeId);
+    const payout = { action: 'settle', roundId: next.round.id, quantity: 399, proceeds: 0, fees: .02,
+      taxWithheld: .01, at: addedAt.toISOString(), note: 'Ausbuchungsbeleg' };
+    await Promise.all([recordFill(payout), recordFill(payout)]);
+    next = await readState();
+    assert.equal(next.round, null);
+    assert.equal(next.executions.filter(execution => execution.settlement).length, 1);
+    const settled = await prisma.trade.findMany({ where: { id: { in: lotIds } } });
+    assert.equal(settled.length, 2);
+    assert.ok(settled.every(trade => trade.exitDate && trade.exitPrice === 0 && trade.taxWithheld !== null));
+    assert.equal(settled.reduce((sum, trade) => sum + trade.exitFees, 0), .02);
+    assert.equal(settled.reduce((sum, trade) => sum + trade.taxWithheld, 0), .01);
   } finally { await prisma.$disconnect(); }
 });

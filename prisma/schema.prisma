@@ -67,6 +67,9 @@ model Trade {
   ratio          Float?
   entryPrice     Float?
   exitPrice      Float?
+  entryFees      Float?
+  exitFees       Float?
+  taxWithheld    Float?
   quantity       Int?
   returnPct      Float?
   holdDays       Int?
@@ -151,6 +154,7 @@ model MarketObservation {
   metadata     Json
 
   @@index([instrument, sourceAt])
+  @@index([instrument, kind, receivedAt(sort: Desc), id(sort: Desc)], map: "MarketObservation_instrument_kind_receivedAt_idx")
   @@index([receivedAt])
   @@index([fetchId])
 }
@@ -189,4 +193,19 @@ model MarketCollectionRun {
   errorCode   String?
 
   @@index([startedAt])
+}
+
+model MarketFetchDaily {
+  day            DateTime @db.Date
+  source         String
+  instrument     String
+  measurement    String
+  calls          BigInt
+  failed         BigInt
+  bytes          BigInt
+  durationMs     BigInt
+  returnedPoints BigInt
+  insertedPoints BigInt
+
+  @@id([day, source, instrument, measurement])
 }

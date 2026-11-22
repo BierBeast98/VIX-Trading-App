@@ -20,7 +20,7 @@ const positive = (value: unknown): value is number => typeof value === 'number' 
 /** Recheck both the signal's original basis and the latest observation before claiming a delivery. */
 function dispatchable(state: State, signal: Signal, now: Date): boolean {
   const quote = state.quote, cfg = state.round?.config ?? state.config;
-  if (!quote || quote.isin !== signal.isin || !positive(quote.bid) || !fresh(quote.productAt, now)) return false;
+  if (!quote || quote.isin !== signal.isin || quote.issuerStatus === 'inactive' || !positive(quote.bid) || !fresh(quote.productAt, now)) return false;
   if (signal.side === 'sell') return true;
   const basis = { ...quote, vix: signal.vix, vixAt: signal.vixAt ?? null,
     vixSource: signal.vixSource, vixFeedMode: signal.vixFeedMode,

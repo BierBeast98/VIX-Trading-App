@@ -1,10 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getVixSpot } from '@/lib/yahoo-finance';
-import { withArchiveContext, persistenceError } from './capture';
+import { withArchiveContext, persistenceError, trackedVontobel } from './capture';
+import { compactMarketFetches } from './retention';
+import { strategyArchiveTargets } from './targets';
 import { archiveConfig, collectingNow } from './config';
-export async function collectMarketData(){
- const config=await archiveConfig(),now=new Date();
+export async function collectMarketData(now = new Date()){
+ const config=await archiveConfig();
  if(!collectingNow(config,now))return {collected:false,reason:config.enabled?'outside_collection_window':'collection_paused'};
  const slot=String(Math.floor(now.getTime()/(config.intervalMinutes*60000)));
  const id=crypto.randomUUID(),leaseUntil=new Date(now.getTime()+120000);
@@ -18,14 +20,27 @@ export async function collectMarketData(){
  }
  if(!claimed)return {collected:false,reason:'collection_in_progress'};
  try{
+  const targets = await strategyArchiveTargets();
   const captureFailure = await withArchiveContext({origin:'collector',runId,slot},async()=>{
-   await getVixSpot({ allowRealtime: false });
+   await Promise.allSettled([
+    getVixSpot({ allowRealtime: false }),
+    ...targets.map(target => trackedVontobel(
+      `https://markets.vontobel.com/de-de/produkte/hebel/mini-futures/${target.isin}`,
+      { signal: AbortSignal.timeout(12000) },
+      target,
+    )),
+   ]);
    return persistenceError();
   });
   const [calls,failed]=await Promise.all([prisma.marketFetch.count({where:{runId}}),prisma.marketFetch.count({where:{runId,OR:[{success:false},{errorCode:{not:null}}]}})]);
-  const expected=1;
+  const expected=1+targets.length;
   const status=calls<expected||captureFailure?'failed':failed?'partial':'completed';
   await prisma.marketCollectionRun.update({where:{id:runId},data:{status,finishedAt:new Date(),errorCode:status==='failed'?'capture_incomplete':null}});
+  // A maintenance error cannot invalidate a market-data run already persisted.
+  if (Number(slot) % 12 === 0) {
+   try { await compactMarketFetches(now); }
+   catch { console.error('[market-archive] fetch retention maintenance failed'); }
+  }
   return {collected:true,status,calls,failed};
  }catch{await prisma.marketCollectionRun.update({where:{id:runId},data:{status:'failed',finishedAt:new Date(),errorCode:'collection_error'}});throw new Error('Datensammlung fehlgeschlagen');}
 }

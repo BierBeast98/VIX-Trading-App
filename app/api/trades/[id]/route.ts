@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
-import { updateTradeSchema, tradeDerivedValues } from "@/lib/trade-validation";
+import { updateTradeSchema, tradeDerivedValues, validateTradeClosingCosts } from "@/lib/trade-validation";
 
 const managedError = "Signalposition bitte über den Signalbereich bzw. per Screenshot abgleichen";
 class TradeError extends Error {
@@ -18,12 +18,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (existing.notes.startsWith("signal:") || existing.position?.notes.startsWith("signal:")) throw new TradeError(managedError, 409);
       const entryDate = parsed.entryDate !== undefined ? new Date(parsed.entryDate) : existing.entryDate;
       const exitDate = parsed.exitDate !== undefined ? (parsed.exitDate === null ? null : new Date(parsed.exitDate)) : existing.exitDate;
+      validateTradeClosingCosts(exitDate, parsed);
       const merged = { ...existing, ...parsed, entryDate, exitDate };
       if ((parsed.entryPrice !== undefined || parsed.exitPrice !== undefined) && parsed.returnPct === undefined) merged.returnPct = null;
       const data = {
         ...parsed, entryDate, exitDate,
         entryVix: parsed.entryVix === null ? 0 : (parsed.entryVix ?? existing.entryVix),
-        ...(!exitDate ? { exitPrice: null, exitVix: null } : {}),
+        ...(!exitDate ? { exitPrice: null, exitVix: null, exitFees: null, taxWithheld: null } : {}),
         ...tradeDerivedValues(merged),
       };
       const updated = await tx.trade.update({ where: { id }, data });

@@ -23,3 +23,12 @@ test('channel receipts avoid repeat sends, failures retry independently',async()
  const {deliverLevels}=load('lib/signals/level-notify.ts',{'./engine':{marketOpen:()=>true},'./levels':{levelText},'./store':{readState:async()=>structuredClone(s),changeState:async fn=>(await fn(s)).result},'./telegram':{telegramChatId:async()=>123},'@/lib/prisma':{prisma:{settings:{findUnique:async()=>({alertEmail:'test@example.com'})}}},resend:{Resend:class{emails={send:async()=>{emails++;return {error:fail?{}:null};}}}}});
  try{await deliverLevels();fail=false;await deliverLevels();await deliverLevels();assert.equal(sends,1);assert.equal(emails,2);assert.ok(s.levels.events[0].notification.email.sentAt);}finally{global.fetch=original;if(old===undefined)delete process.env.TELEGRAM_BOT_TOKEN;else process.env.TELEGRAM_BOT_TOKEN=old;if(emailKey===undefined)delete process.env.RESEND_API_KEY;else process.env.RESEND_API_KEY=emailKey;}
 });
+
+test('independent configurable notification levels still work with inactive product metadata', () => {
+  const s = state();
+  s.config.notificationLevels = [18, 17, 16];
+  s.config.entryLevels = [15.5, 14.5, 13.5];
+  evaluateLevels(s, { ...quote(16.5), issuerStatus: 'inactive', productValid: false }, now);
+  assert.deepEqual(s.levels.events[0].levels, [18, 17]);
+  assert.equal(s.signals.length, 0);
+});

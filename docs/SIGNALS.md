@@ -6,10 +6,10 @@ Stand: 17.11.2026. Die App erzeugt regelbasierte Signale; Orders werden ausschli
 
 1. Änderungen auf der bestehenden Next.js-Installation bereitstellen. Kein Prisma-Schemawechsel nötig: der transaktionale Signalzustand liegt unter `VixCache.manual_strategy_v1`. Vorhandene Positionen werden nicht automatisch als Strategiepositionen übernommen.
 2. Die Website-Anmeldung mit E-Mail und Passwort auf dem Server einrichten (siehe [AUTH.md](AUTH.md)). Dieselbe Sitzung gilt auch für Signale und Archiv. `SIGNALS_ACCESS_KEY` bleibt für bestehende API-Clients wie das Widget erforderlich.
-3. Unter `/signals` das für die Strategie reservierte Kapital und Variante A/B/C eintragen. Standard: C, geplanter Einstiegshebel 2,3. Das ist eine konfigurierbare Modellvariante, keine bestätigte Anlagestrategie.
+3. Unter `/signals` stehen die gespeicherte Strategie und die Einstellungen für Benachrichtigungen und Datenquellen. Die Kaufstufen und VIX-Niveau-Meldungen lassen sich getrennt einstellen. Produkt und Kaufstufen bleiben während einer offenen Signalrunde oder eines offenen Signals gesperrt. Tatsächliche Änderungen der Strategie werden mit altem und neuem Stand archiviert.
 4. Ein **aktives Long-Zertifikat in EUR** auswählen. ISIN, WKN, Richtung, tatsächlichen VX-Einzelkontrakt, dessen Emittentensymbol und Verfall sowie Barriere und geplanten Hebel anhand der Produktunterlagen prüfen. Die alte Dashboard-Standard-ISIN ist keine automatische Auswahl. Der aktuelle Adapter unterstützt Vontobel. Automatische Auswahl des nächstfälligen geeigneten Produkts und automatische Rollen sind nicht implementiert.
 5. Broker **und Handelsplatz** festlegen. Als Zeitfenster die gemeinsame Handelbarkeit von Broker, Handelsplatz und Emittent einstellen. Zeiten gelten in `Europe/Berlin`, Montag bis Freitag; das Ende ist exklusiv. Handelsfreie Tage explizit pflegen. Es gibt noch keinen automatisch synchronisierten Börsenkalender. Verkürzte Handelstage verlangen vorübergehend angepasste Endzeiten. Ohne bestätigte Zeiten bleibt die Aktivierung gesperrt.
-6. Telegram und E-Mail einrichten; anschließend die Überwachung ausdrücklich aktivieren. Der Standard ist **pausiert**. Aktivierung ist kein Nachweis, dass der Datenfeed oder die Zustellung funktioniert: den sichtbaren Status und beide Kanalbelege prüfen.
+6. Telegram und E-Mail einrichten und die Überwachung aktivieren. Niveau-Meldungen funktionieren auch ohne Prüfprodukt, wenn das Brokerfenster und ein Versandkanal eingerichtet sind. Kaufsignale setzen eine geprüfte Produktzuordnung voraus.
 
 ## Telegram und E-Mail
 
@@ -36,15 +36,21 @@ Verkäufe werden anhand frischer Produkt-Geldkurse auch bei ausgefallenem VIX/VX
 
 ## Regeln
 
-- Beobachtetes Unterschreiten von VIX 15,5: kumuliert 30 %. Neue Abwärtskreuzungen bei 14,5 und 13,5: 40 % bzw. 50 %. Bei übersprungenen Schwellen gilt die erreichte Zielstufe. Bei 12,5 keine zusätzliche Stufe.
+- Standard-Kaufstufen: beobachtetes Unterschreiten von VIX 15,5 mit kumuliert 30 % Einsatz, Abwärtskreuzungen bei 14,5 und 13,5 mit 40 % bzw. 50 %. Bei übersprungenen Schwellen gilt die erreichte Zielstufe. Die separat konfigurierbaren Niveau-Meldungen verwenden dieselben Standardwerte und melden bereits beim Erreichen.
 - Bestätigte VIX-Datenregel `delayed20`: Yahoo-VIX für Einstiege maximal20 Minuten alt; Zertifikats-Geld/Brief und tatsächlicher VX weiterhin maximal5 Minuten. Ausstiege verwenden den frischen Vontobel-Geldkurs unabhängig vom VIX. Quelle/Kurszeit des verzögerten Einstiegs sichtbar.
 - VX/VIX-Aufschlag maximal 15 %, konkreter VX-Kontrakt mindestens 30 Tage Restlaufzeit. Ein Produkt-/Kontraktwechsel ist bei offener Runde gesperrt.
 - Weitere Käufe gesperrt nach aktivem Trailing oder Teilreduktion. Budget pro Nachkauf ist kumulierte Zielquote minus tatsächliche bisherige Kaufkosten inklusive Gebühren.
 - Trailing ab +10 % auf den gemeinsamen liquidierbaren Positionswert relativ zu verbleibenden Anschaffungskosten: 8 % Abstand zum Höchstwert, ab +20 % 6 %, ab +35 % 5 %. Die Barriere sinkt nicht. Verkauf bei Unterschreiten.
 - Positionsverlustgrenze −40 %. Variante C priorisiert realisierten plus unrealisierten Rundenverlust von 6 % des festgelegten Startkapitals.
 - A: Zeitverkauf nach zehn Kalendertagen. B/C: einmalige Prüfung ab Tag zehn, ohne aktives Trailing und bei Rendite <= 0 Verkauf von 80 % jeder Tranche. Ganze Stücke werden abgerundet, mindestens ein Stück verkauft; sehr kleine Tranchen können vollständig geschlossen werden. Rest ohne Trailing ab Tag 20 schließen. Tage werden nach Berliner Kalenderdatum berechnet.
-- Nach vollständigem Ausstieg erneute Beobachtung von mindestens 15,5 und anschließende Abwärtskreuzung erforderlich. Rundenbudget bleibt innerhalb einer Runde fest; bestätigte Gewinne/Verluste bestimmen das Budget der nächsten Runde.
+- Nach vollständigem Ausstieg muss der VIX erst wieder mindestens auf Höhe der ersten Kaufstufe liegen und diese dann unterschreiten. Das Rundenbudget bleibt während der Runde fest. Bestätigte Ergebnisse einschließlich Gebühren und erfasster Steuerabzüge bestimmen das Budget der nächsten Runde.
 - Verlust- und Trailing-Schwellen sind Signale. Reaktionszeit, Kurslücken, Spreads und Gebühren können den tatsächlichen Verlust vergrößern. Noch unbekannte Verkaufsgebühren werden vor Ausführung nicht geschätzt.
+
+## Ausbuchung und Produktwechsel
+
+Der Produktstatus im Signalbereich zeigt bestätigte Inaktivität, vorübergehend fehlende Emittentendaten, abweichende Produktzuordnungen und die Restlaufzeit des VX-Kontrakts. Die Produktkonfiguration erstellt keinen Bestand. Nach bestätigter Inaktivität verlieren offene Empfehlungen für die ISIN ihre Gültigkeit.
+
+Für eine offene Signalrunde die Ausbuchung erst nach Eingang der Brokerabrechnung erfassen. Im Formular müssen Zeitpunkt, bestätigter Gesamtbetrag vor Abzügen und Gebühren eingetragen werden. Bei wertloser Ausbuchung beträgt der Gesamtbetrag 0 €. Für den Steuerabzug gilt: 0 € steht für einen bestätigten Abzug von null, ein leeres Feld für einen unbekannten Betrag. Die App schließt die Position erst beim Speichern des bestätigten gesamten Restbestands.
 
 ## Screenshot → tatsächliche Ausführung
 

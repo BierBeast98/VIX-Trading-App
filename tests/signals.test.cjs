@@ -119,3 +119,54 @@ test('risk exit needs a fresh Vontobel bid while delayed/missing VIX and actual 
   const stale=evaluate(staleState,{...q,productAt:new Date(now.getTime()-5*60000-1).toISOString()},now);
   assert.equal(stale.signals.filter(signal=>signal.status==='pending').length,0);assert.match(stale.health,/kein frischer Geldkurs/);
 });
+
+test('configured entry levels control crossing, explanation, and frozen round stages', () => {
+  const configured = ready();
+  configured.config.entryLevels = [20, 18, 16];
+  configured.config.notificationLevels = [14, 13, 12];
+  const early = new Date(start.getTime() - 60_000);
+  const armed = evaluate(configured, quote(20, early), early);
+  assert.equal(evaluate(armed, quote(20), start).signals.length, 0);
+  const crossing = evaluate(armed, quote(18.5), start);
+  assert.equal(crossing.signals[0].targetPct, 30);
+  assert.match(crossing.signals[0].reason, /unterschreitet 20/);
+  const round = confirm(crossing, { signalId: crossing.signals[0].id, action: 'execute', quantity: 299, price: 10 }, start);
+  round.config.entryLevels = [24, 21, 19];
+  const next = new Date(start.getTime() + 60_000);
+  assert.equal(evaluate(round, quote(18, next), next).signals[0].targetPct, 40);
+});
+
+test('definitive inactivity supersedes a pending recommendation and permits subsequent manual settlement', () => {
+  const held = bought();
+  const at = new Date(start.getTime() + 60_000);
+  const sell = evaluate(held, quote(15, at, 7), at);
+  assert.equal(sell.signals[0].status, 'pending');
+  const later = atDays(1);
+  const next = evaluate(sell, { ...quote(15, later, 7), issuerStatus: 'inactive', productValid: false }, later);
+  assert.equal(next.signals[0].status, 'superseded');
+  assert.match(next.health, /Ausbuchung/);
+  const fill = { action: 'settle', roundId: next.round.id, quantity: 299, proceeds: 0, fees: 0, at: later.toISOString(), taxWithheld: 0 };
+  assert.throws(() => confirm(next, { ...fill, quantity: 298 }, later), /Bestand/);
+  const settled = confirm(next, fill, later);
+  assert.equal(settled.round, null);
+  assert.equal(settled.config.productVerified, false);
+  assert.equal(settled.config.capital, 7005);
+  assert.equal(settled.executions[0].price, 0);
+  assert.equal(settled.executions[0].taxWithheld, 0);
+  assert.deepEqual(confirm(settled, fill, later), settled);
+  assert.throws(() => confirm(settled, { ...fill, proceeds: 10 }, later), /andere Ausführung/);
+});
+
+test('withholding reduces future allocation capital but leaves the round risk result pre-tax', () => {
+  const held = bought();
+  const first = atDays(10);
+  const reduced = evaluate(held, quote(15, first, 9.5), first);
+  const partial = reduced.signals[0];
+  const next = confirm(reduced, { signalId: partial.id, action: 'execute', quantity: partial.quantity, price: 9.5, fees: 2, taxWithheld: 12 }, first);
+  assert.equal(next.round.taxWithheld, 12);
+  assert.ok(Math.abs(roundMetrics(next.round, 9.5).pnl - (299 * 9.5 - 2995 - 2)) < 1e-8);
+  const last = atDays(20);
+  const sold = confirm(next, { action: 'settle', roundId: next.round.id, quantity: 60, proceeds: 6, fees: 0, at: last.toISOString() }, last);
+  assert.ok(Math.abs(sold.config.capital - (10000 + 239 * 9.5 + 6 - 2995 - 2 - 12)) < 1e-8);
+  assert.equal(sold.executions[0].taxWithheld, null);
+});

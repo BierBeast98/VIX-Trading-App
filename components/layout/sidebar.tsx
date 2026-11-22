@@ -2,15 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   LayoutDashboard,
   History,
   Database,
   BellRing,
-  BarChart3,
   Calendar,
-  Settings,
   Zap,
   Menu,
   X,
@@ -20,32 +18,16 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/signals", label: "Handelssignale", icon: BellRing },
-  { href: "/archive", label: "Datenarchiv", icon: Database },
   { href: "/trades", label: "Trades", icon: History },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/calendar", label: "Kalender", icon: Calendar },
-  { href: "/settings", label: "Einstellungen", icon: Settings },
-];
-
-// Mobile overlay only shows pages not in bottom tab bar
-const mobileNavItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/calendar", label: "Kalender", icon: Calendar },
-  { href: "/signals", label: "Handelssignale", icon: BellRing },
   { href: "/archive", label: "Datenarchiv", icon: Database },
-  { href: "/trades", label: "Trades", icon: History },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/settings", label: "Einstellungen", icon: Settings },
+  { href: "/calendar", label: "Kalender", icon: Calendar },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Close sidebar on route change
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+  const [openOnPath, setOpenOnPath] = useState<string | null>(null);
+  const mobileOpen = openOnPath === pathname;
+  const close = () => setOpenOnPath(null);
 
   const renderNav = (items: typeof navItems, showClose = false) => (
     <>
@@ -65,7 +47,8 @@ export function Sidebar() {
         </div>
         {showClose && (
           <button
-            onClick={() => setMobileOpen(false)}
+            onClick={close}
+            aria-label="Menü schließen"
             className="ml-auto p-1 rounded-lg"
             style={{ color: "#8B8FA8" }}
           >
@@ -82,6 +65,8 @@ export function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={showClose ? close : undefined}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
                 isActive
@@ -126,7 +111,9 @@ export function Sidebar() {
         }}
       >
         <button
-          onClick={() => setMobileOpen(true)}
+          onClick={() => setOpenOnPath(pathname)}
+          aria-label="Menü öffnen"
+          aria-expanded={mobileOpen}
           className="p-1.5 rounded-lg"
           style={{ color: "#8B8FA8" }}
         >
@@ -154,15 +141,15 @@ export function Sidebar() {
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 z-50 bg-black/60 lg:hidden"
-            onClick={() => setMobileOpen(false)}
+            className="fixed inset-0 z-[60] bg-black/60 lg:hidden"
+            onClick={close}
           />
           {/* Sidebar panel */}
           <aside
-            className="fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col lg:hidden"
+            className="fixed inset-y-0 left-0 z-[60] flex w-[260px] flex-col lg:hidden"
             style={{ background: "#0C0C0F" }}
           >
-            {renderNav(mobileNavItems, true)}
+            {renderNav(navItems, true)}
           </aside>
         </>
       )}

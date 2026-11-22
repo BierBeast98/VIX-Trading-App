@@ -1,54 +1,42 @@
-# Langfristiges Marktdatenarchiv
+# Marktdatenarchiv
 
-## Abrufhäufigkeit und Umfang
+## Was gesammelt wird
 
-Die vorherige Oberfläche aktualisiert in der Regel alle fünf Minuten, wenn sie geöffnet ist (altes Fenster 07:00–22:30 Berlin). Cache-Antworten sind keine neuen Quellenabrufe. Vor dieser Erweiterung war bei Hostinger kein Cron-Job konfiguriert; ein kontinuierlicher Fünf-Minuten-Abruf konnte deshalb nicht zugesichert werden.
+Der Collector läuft unabhängig von geöffneten Browsern und von der Signalüberwachung. Der geschützte Sammel-Endpunkt wird alle fünf Minuten aufgerufen. Das serverseitige Sammelfenster gilt in Europe/Berlin, Mo–Fr 08:00 bis vor 22:00 Uhr, außer hinterlegten Schließtagen.
 
-Die neue Datensammlung läuft unabhängig von geöffneten Browsern und unabhängig vom Aktivierungszustand der Handelsüberwachung. Ein Hostinger-Cron ruft alle fünf Minuten den geschützten `POST /api/archive/collect` auf. Das Sammelfenster wird serverseitig in Europe/Berlin geprüft: Mo–Fr 08:00 bis vor 22:00 Uhr, außer hinterlegten Schließtagen. Sommerzeit wird über Intl behandelt. Sonderzeiten und Kalender für kommende Jahre müssen vorab gepflegt werden.
+- Der Collector fragt den verzögerten Yahoo-VIX als Indexstand ab. Pro Sammelintervall kann ein Wert gespeichert werden, auch anhand eines unveränderten Quellkurses. Quellzeit und Empfangszeit bleiben getrennt. Das sind Kursstichproben. App-Abrufe können zusätzlich echte Yahoo-VIX-Tages- und Intraday-Kerzen speichern. Eine konfigurierte Massive-Abfrage speichert VIX unter der separaten Kennung `MASSIVE:I:VIX`.
+- Pro Intervall wird die Emittentenseite des bestätigten Strategieprodukts und der aktuell gehaltenen Produkte mit gültiger ISIN abgerufen. Während einer Signalrunde hat deren bestätigte Zuordnung Vorrang. Identische ISINs werden einmal pro Sammellauf abgefragt. Manuelle offene Positionen und eigenständige offene Trades können datierte Geld-/Briefkurse und Produktstatus beitragen, sobald Vontobel sie unter dieser ISIN ausweist. Ohne bestätigte Zuordnung fließt ihr Basiswert nicht in Strategietests ein. Der Collector selbst lädt keine Vontobel-Chartserien herunter.
+- Wir speichern datierte Original-Geld- und Briefkurse sowie den tatsächlichen VX-Kurs bei übereinstimmendem Emittentensymbol und geprüftem Verfall aus der Strategiekonfiguration. Das Archiv erfasst Änderungen von Produktstatus und Stammdaten, einschließlich beobachtetem und erwartetem Basisvertrag, Barriere und, soweit vom Emittenten ausgewiesen, Basispreis, Bezugsverhältnis und Finanzierungsspanne.
+- VIX3M, EUR/USD, S&P 500 und S&P-500-Future können die App weiterhin mit aktuellen Kursen und nachgeladener Historie versorgen. Das Archiv legt dafür keine neuen langfristigen Kursbeobachtungen an. Bestehende Reihen werden weiter angezeigt.
 
-Der geplante Sammellauf ruft ausschließlich den verzögerten Yahoo-VIX ab, maximal 168 Mal pro vollem Handelstag. Die Signalprüfung verwendet nach Möglichkeit einen höchstens vier Minuten zuvor empfangenen, höchstens 20 Minuten alten gespeicherten Wert. Bei Ausfall holt sie selbst einen Wert. Neue Kursbeobachtungen werden nur für den VIX archiviert; bestehende historische Daten und Abrufstatistiken bleiben erhalten. Zeitgleiche oder zusätzliche App-Abrufe können weitere Quellenanfragen verursachen. Jeder erfolgreiche geplante Lauf kann eine eigene Beobachtung pro Fünf-Minuten-Slot speichern, auch bei unverändertem Quellkurs. Quellzeit und Empfangszeit bleiben getrennt; es handelt sich nicht um echte 5-Minuten-OHLC-Kerzen.
+Die Signalprüfung verwendet nach Möglichkeit einen höchstens vier Minuten zuvor empfangenen Yahoo-VIX mit höchstens 20 Minuten Kursalter. Bei Bedarf fragt sie die Quelle direkt ab. Produktabfragen des Signalprüflaufs liefern ebenfalls archivierungsfähige Daten und können zusätzliche Emittentenabrufe auslösen. Fehlende Quellen, veraltete Stichproben und Änderungen des Basisvertrags können Abdeckungslücken verursachen.
 
-Yahoo wird auf Ebene der SDK-Aufrufe gemessen. Cookie-/Crumb-Abfragen, interne Wiederholungen und der genaue Yahoo-Netzwerkverkehr sind nicht bekannt und werden nicht als exakt gemessen dargestellt. Bei Massive und Vontobel werden direkte fetch-Aufrufe sowie die UTF-8-Größe der dekomprimierten Textantwort erfasst. Diese Bytes sind kein Maß für den vollständigen Netzwerkverkehr. Massive wird als eigene Quelle `massive`, Instrument `MASSIVE:I:VIX` und Art `index_quote` gespeichert; Yahoo-VIX bleibt separat unter `YAHOO:^VIX`. API-Schlüssel und rohe Antwortinhalte werden nicht im Archiv gespeichert. HTML-Antworten werden ebenfalls nicht dauerhaft gespeichert.
+## Daten für Strategietests
 
-## Dauerhafte Daten
+- `strategy_certificate_quote` speichert je Abruf die vorhandenen, vom Emittenten datierten Geld-/Briefseiten. `sourceAt` ist die Quellzeit des Geldkurses, falls vorhanden, sonst des Briefkurses. `metadata.bidSourceAt` und `metadata.askSourceAt` geben die jeweilige Quellzeit an. Bei abweichendem VX-Symbol kann der tatsächliche Zertifikatsgeldkurs weiter vorliegen. In diesem Fall zeigt `metadata.mappingVerified=false` die fehlende Zuordnung.
+- `strategy_vx_quote` verlangt bestätigte Zuordnung, konkretes `contract`-Symbol, `metadata.futureExpiry` und tatsächlich datierten Einzelkontraktkurs aus dem Emittenten-Snapshot. Gehören Zertifikat und VX zum selben Abruf, teilen sie eine `fetchId`.
+- `strategy_product_status` erfasst beobachtete Änderungen. Ohne eindeutigen Ereigniszeitpunkt beim Emittenten bleibt `sourceAt` leer. `receivedAt` ist der Beobachtungszeitpunkt. Ein Abruffehler ergibt „Status unbekannt“. Ein inaktiver Status verlangt eine passende explizite Emittentenangabe. Historische Preisstände werden als separate Beobachtungen aufbewahrt. Aus dem Status allein folgt kein tatsächlicher Abrechnungskurs oder Restwert.
+- Historische Chartpunkte ohne eindeutiges Kontraktsymbol bleiben als `UNVERIFIED_UNDERLYING_SERIES:<ISIN>` separat. VIX3M ist ein Index. Wegen unklarer Zuordnung bleiben die alten generischen FUTURES-Daten aus `VixIntraday` außerhalb dieser Auswertung.
+- Ein Replay muss neben der Kurszeit auch den Empfang berücksichtigen. Ein erst später eingetroffener Wert war zu einem früheren Signalzeitpunkt noch nicht bekannt. Preiswerte älterer Stichproben bleiben im Archiv und ihre Nutzbarkeit richtet sich nach den Altersgrenzen der Strategie.
 
-- `MarketObservation`: Quelle, Instrument, Art, Währung, ISIN/Einzelkontrakt, originale Quellzeit (oder explizit fehlend), tatsächliche erste Empfangszeit, Kursfelder und Qualitätsstatus.
-- `MarketFetch`: jeder erfasste Quellenaufruf inklusive fehlgeschlagener Aufrufe, Beginn/Ende, Dauer, HTTP-Status soweit bekannt, Messart, Antwortgröße soweit bekannt, Anzahl gelieferter/neuer Punkte und Herkunft (App, Signalprüfung, Collector).
-- `MarketCollectionRun`: regelmäßige Sammelläufe, Status und zeitlich begrenzte Lease. Ein abgeschlossener Slot wird nicht doppelt gesammelt. Gleichzeitige Prozesse werden über die DB koordiniert.
+## Abrufstatistiken und Export
 
-Identische Quellzeit/Kurse/Instrumente werden nicht erneut als Datenpunkt gespeichert; der erneute Abruf bleibt als eigener MarketFetch sichtbar. Eine geänderte Preisangabe bei gleicher Quellzeit bleibt als Revision erhalten. Ohne Quellzeit wird keine Quellzeit erfunden und keine scheinbare Eindeutigkeit angenommen.
+`MarketFetch` erfasst Quelle, Instrument, Beginn und Ende des Aufrufs, Laufzeit, Erfolg/Fehler, Zahl der gelieferten und neu gespeicherten Punkte sowie, soweit messbar, HTTP-Status und Antwortgröße. Yahoo wird auf SDK-Ebene erfasst. Massive und Vontobel werden je direktem HTTP-Aufruf gemessen. Antwortgrößen beziehen sich auf die dekomprimierte Antwort. API-Schlüssel und rohe Antwortinhalte werden nicht gespeichert.
 
-Frisch/veraltet bezieht sich auf den ersten Empfang eines gespeicherten Punktes (fünf Minuten Grenze). Historische Kerzen sind explizit historisch. Veraltete Werte werden zur Analyse aufbewahrt, damit aber nicht für Handelssignale freigegeben.
+Einzelabrufe bleiben rund **60 Berliner Kalendertage** im Detail verfügbar. Ein regelmäßiger Sammellauf fasst ältere Abrufe transaktional nach Berliner Tag, Quelle, Instrument und Messart zusammen. Während der Umstellung kann die Detailhistorie vorübergehend weiter zurückreichen. Kursbeobachtungen, Produktstatus und Sammellauf-Historie werden davon unabhängig erhalten.
 
-Aktuelle Emittentenseiten können einen konkreten VX-Vertrag mit Symbol benennen. Historische Vontobel-Chartpunkte geben hingegen nicht zwingend für jeden Punkt den damaligen Vertrag an. Solche Reihen werden als `UNVERIFIED_UNDERLYING_SERIES:<ISIN>` getrennt gespeichert, nicht rückwirkend einem heutigen Vertrag zugeordnet. VIX3M bleibt ein Index/Proxy und wird niemals zu VX umbenannt. Die alte `VixIntraday`-Tabelle bleibt unverändert; deren generische FUTURES-Daten werden wegen unklarer Identität und möglicher Proxy-Fallbacks nicht stillschweigend importiert.
+- `/api/archive/export?type=quotes` liefert Kursbeobachtungen und Produktstatus inklusive Herkunft, Quell- und Empfangszeit, Abruf-ID und Metadaten.
+- `/api/archive/export?type=requests` liefert noch verfügbare Einzelabrufe. Die alte Detailtiefe kann aus den Tagesstatistiken nicht wiederhergestellt werden.
+- `/api/archive/export?type=days` liefert die Tagesstatistik über den gewählten Zeitraum ohne Begrenzung durch die Anzeige. Zusammengefasste ältere Daten werden in ganzen Berliner Tagen ausgewertet.
+- Zeitraum, Quelle und Instrument können im Archiv gefiltert werden. Kursdaten verwenden die Empfangszeit, Einzelabrufe die Startzeit. CSV verwendet UTF-8 mit BOM und UTC für Zeitstempel. CSV-Sicherungen sind möglich, ein externes Backup wird dadurch nicht automatisch eingerichtet.
 
-## Aufbewahrung und Export
+## Betrieb und Einrichtung
 
-Kein automatisches Löschen oder Überschreiben des Archivs. PostgreSQL ist dauerhafter Speicher über App-Neustarts und Deployments hinweg. Das ist kein unabhängiges externes Backup. Eigene CSV-Sicherungen sind möglich. Datenbanktarif und Speicherkapazität müssen bei wachsendem Archiv beobachtet werden; es erfolgen keine automatischen Tarifwechsel.
+Die Tabellen für ältere Archivstände stehen in `prisma/migrations/20261117_market_archive/migration.sql`. `20261122_archive_daily` ergänzt die Tagesstatistik und einen Index für Produktstatus. `node scripts/apply-archive-schema.cjs` wendet beide Migrationen transaktional und idempotent an. Vor Bereitstellung braucht die Zielumgebung die neue Archivtabelle. Die lokale Integrationsprüfung erfolgt auf einer dedizierten Wegwerf-Datenbank.
 
-`/archive` zeigt Gesamtbestand, Speichergröße inklusive Indizes, Quellenabrufe und Fehler pro Tag, Datenreihen und Quellzeiten sowie Qualitätsklassen. Zugang über die zentrale Website-Anmeldung mit E-Mail und Passwort (siehe [AUTH.md](AUTH.md)); Archiv und Signalbereich verwenden dieselbe Sitzung.
+Der Collector verwendet `VixCache.market_archive_config_v1`. Darin steht nur der SHA-256-Hash des privaten Collector-Tokens. Der persönliche Nutzerzugang ist separat. Die zentrale Website-Anmeldung schützt Archiv und Exporte. [Anmeldung](AUTH.md)
 
-- `/api/archive/export?type=quotes`: Kursdaten.
-- `/api/archive/export?type=requests`: Abrufprotokoll.
-- ISO-Filter `from`/`to`, optional `source` (massive/yahoo/vontobel) und exakte `instrument`-Kennung. Die Oberfläche übersetzt Berliner Kalendertage in UTC-Grenzen.
-- Filter nach Abruf-/Empfangszeit; CSV enthält zusätzlich Original-Quellzeit. Ein historischer Punkt, der heute geladen wird, hat deshalb heute eine Empfangszeit und eine frühere Quellzeit.
-- UTF-8 mit BOM, Semikolon als Trennzeichen, Dezimalpunkt für Zahlen, UTC-Zeitstempel. String-Felder werden gegen Excel-Formelauswertung entschärft.
-- Streaming in Blöcken von 1.000 Zeilen ohne stilles Gesamt-Zeilenlimit. Die Tagesübersicht begrenzt ausschließlich die Anzeige auf 366 Tage. Für sehr große Exporte können Zeiträume aufgeteilt werden; ein Netzwerk-/Serverabbruch kann einen Download unterbrechen.
+## Prüfungen
 
-## Betrieb und Authentifizierung
-
-`VixCache.market_archive_config_v1` hält Sammelkonfiguration und ausschließlich den SHA-256-Hash eines zufälligen, nur für den Collector gültigen Bearer-Tokens. Das eigentliche Token liegt in der privaten Hostinger-Cron-Konfiguration; es wird nicht in Git/Logs oder die Browserantworten geschrieben. Es erlaubt nur den begrenzten Sammellauf, keinen Zugriff auf Trades oder Archivexporte. Der persönliche Nutzerzugang ist separat.
-
-HTTP-Caches der Oberfläche werden nicht als Quellenabrufe gezählt. Ein Archiv-Schreibfehler wird im Serverlog und als Prozessstatus kenntlich gemacht; vorhandene Marktdatenfunktionen bleiben nutzbar. Nicht erfolgreich persistierte Abrufe können bei einem Datenbankausfall fehlen; erfolgreiche Archivierung wird nicht behauptet. Fehlgeschlagene/unvollständige Collector-Läufe bleiben erkennbar. Es wird keine lückenlose rückwirkende Historie erfunden.
-
-## Datenbankeinrichtung
-
-Die Migration `prisma/migrations/20261117_market_archive/migration.sql` erstellt ausschließlich drei neue Tabellen und ihre Indizes. `node scripts/apply-archive-schema.cjs` wendet sie transaktional und idempotent an. Keine bisherigen Trading-Tabellen werden verändert/gelöscht. Produktionszugang bleibt ausschließlich in der vorhandenen, nicht versionierten Umgebung.
-
-## Verifikation
-
-- `npm run test:archive`: Normalisierung, Duplikate/Revisionen, Trennung von Kontrakten und Proxys, Zeitqualität, Kalender/Sommerzeit, CSV-Escaping und Quellenfilter inklusive Massive.
-- `tests/archive-db.test.cjs`: nur gegen die explizit wegwerfbare lokale Datenbank `vix_signals_test` auf 127.0.0.1:55439. Prüft persistierte Abrufe, Fehlerfälle, Duplikate und parallele Collector-Aufrufe mit simulierten Quellen.
-- HTTP-Prüfung: Zugriffsschutz, Cookie-Pfad, Statistik/DB-Größe und CSV mit 2.005 Punkten über drei Datenbankseiten vollständig und ohne doppelte IDs.
-- Desktop und 390px-Handyansicht geprüft; die Hauptspalte darf bei breiten Tabellen schrumpfen, Tabellen scrollen innerhalb ihrer Karte.
-- Bestehende 33 Signal-/Telegram-Tests weiter erfolgreich. Kein automatischer Handel wird durch die Datensammlung aktiviert.
+- `npm run test:archive` prüft Zeitstempel, Instrumentzuordnung, beobachteten inaktiven und unbekannten Produktstatus, Original-Geld-/Briefkurse, Berliner Sammelfenster, Duplikate und CSV.
+- `tests/archive-db.test.cjs` prüft parallele Collector-Läufe, zusammengehörende Kursbeobachtungen, Statusänderungen sowie konkurrierende Kompaktierung mit unveränderten Tageszahlen. Der Test akzeptiert ausschließlich die lokale Datenbank `vix_archive_test` auf Port 55439.

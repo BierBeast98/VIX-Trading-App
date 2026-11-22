@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { eligibleArchiveTarget, strategyIssuerPageSamples, strategyIssuerSamples, type ArchiveTarget } from './strategy-samples';
 import { quality, sampleKey, yahooSamples, vontobelSamples, type Sample } from './normalize';
 type Context = { origin: string; runId?: string; slot?: string; persistenceFailure?: string | null };
 const context = new AsyncLocalStorage<Context>();
@@ -12,17 +12,44 @@ export async function persistFetch(input: { id: string; source: string; operatio
   const finishedAt = new Date(), ctx = context.getStore();
   try {
     await prisma.$transaction(async tx => {
-      // Persist new VIX observations only; request statistics remain available for all sources.
-      const rows = input.samples.filter(s => s.instrument === 'YAHOO:^VIX' || s.instrument === 'MASSIVE:I:VIX').map(s => ({ key: ctx?.origin === 'collector' && ctx.slot && s.instrument === 'YAHOO:^VIX' && s.kind === 'index_quote' ? `collector-vix:${ctx.slot}` : sampleKey(s,input.id),fetchId:input.id,source:s.source,instrument:s.instrument,kind:s.kind,
-        currency:s.currency ?? null,isin:s.isin ?? null,contract:s.contract ?? null,sourceAt:s.sourceAt ? new Date(s.sourceAt) : null,
-        receivedAt:finishedAt,quality:quality(s,finishedAt),last:s.last ?? null,bid:s.bid ?? null,ask:s.ask ?? null,
-        open:s.open ?? null,high:s.high ?? null,low:s.low ?? null,close:s.close ?? null,volume:s.volume ?? null,
-        metadata:({ ...s.metadata, ...(ctx?.origin === 'collector' && ctx.slot ? { archiveSlot: ctx.slot } : {}) }) as Prisma.InputJsonValue }));
-      const inserted = rows.length ? (await tx.marketObservation.createMany({data:rows,skipDuplicates:true})).count : 0;
+      const retained = [];
+      for (const sample of input.samples) {
+        const isVix = sample.instrument === 'YAHOO:^VIX' || sample.instrument === 'MASSIVE:I:VIX';
+        const isStrategySnapshot = sample.kind === 'strategy_vx_quote' || sample.kind === 'strategy_certificate_quote';
+        const isProductStatus = sample.kind === 'strategy_product_status';
+        if (!isVix && !isStrategySnapshot && !isProductStatus) continue;
+        if (isProductStatus) {
+          // Serialize status changes for this ISIN across collector and signal workers.
+          await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${`market-product:${sample.instrument}`}, 0))`;
+          const previous = await tx.marketObservation.findFirst({
+            where: { instrument: sample.instrument, kind: sample.kind }, orderBy: [{ receivedAt: 'desc' }, { id: 'desc' }],
+            select: { receivedAt: true, metadata: true },
+          });
+          const sameMetadata = Object.entries(sample.metadata ?? {}).every(([key, value]) =>
+            (previous?.metadata as Record<string, unknown> | null)?.[key] === value);
+          if (previous && (previous.receivedAt > finishedAt || sameMetadata)) continue;
+        }
+        retained.push({
+          key: ctx?.origin === 'collector' && ctx.slot && sample.instrument === 'YAHOO:^VIX' && sample.kind === 'index_quote'
+            ? `collector-vix:${ctx.slot}`
+            : isStrategySnapshot || isProductStatus
+              ? `${sample.kind}:${sample.instrument}:${input.id}`
+              : sampleKey(sample, input.id),
+          fetchId: input.id, source: sample.source, instrument: sample.instrument, kind: sample.kind,
+          currency: sample.currency ?? null, isin: sample.isin ?? null, contract: sample.contract ?? null,
+          sourceAt: sample.sourceAt ? new Date(sample.sourceAt) : null, receivedAt: finishedAt,
+          quality: isProductStatus ? 'status_observed' : quality(sample, finishedAt),
+          last: sample.last ?? null, bid: sample.bid ?? null, ask: sample.ask ?? null,
+          open: sample.open ?? null, high: sample.high ?? null, low: sample.low ?? null,
+          close: sample.close ?? null, volume: sample.volume ?? null,
+          metadata: { ...sample.metadata, ...(ctx?.origin === 'collector' && ctx.slot ? { archiveSlot: ctx.slot } : {}) },
+        });
+      }
+      const inserted = retained.length ? (await tx.marketObservation.createMany({ data: retained, skipDuplicates: true })).count : 0;
       await tx.marketFetch.create({data:{id:input.id,runId:ctx?.runId ?? null,source:input.source,operation:input.operation,instrument:input.instrument,
         origin:ctx?.origin ?? 'app',measurement:input.measurement,startedAt:input.startedAt,finishedAt,
         durationMs:Math.min(2147483647,Math.max(0,finishedAt.getTime()-input.startedAt.getTime())),success:input.success,
-        httpStatus:input.httpStatus ?? null,responseBytes:input.responseBytes ?? null,returnedPoints:input.samples.length,insertedPoints:inserted,errorCode:input.errorCode ?? null}});
+        httpStatus:input.httpStatus ?? null,responseBytes:input.responseBytes ?? null,returnedPoints:input.samples.filter(s => s.kind !== 'strategy_product_status' || s.metadata?.status !== 'unavailable').length,insertedPoints:inserted,errorCode:input.errorCode ?? null}});
     },{timeout:20000});
   } catch {
     lastPersistenceError = new Date().toISOString();
@@ -43,16 +70,25 @@ export async function trackedYahoo<T>(symbol: string, operation: string, fn: () 
   return value;
 }
 /** All direct Vontobel HTTP requests are counted once, including failures; HTML is not retained. */
-export async function trackedVontobel(url: string, options?: RequestInit): Promise<Response> {
+export async function trackedVontobel(url: string, options?: RequestInit, target?: ArchiveTarget): Promise<Response> {
   const id=crypto.randomUUID(),startedAt=new Date();
   const isin=url.match(/\/([A-Z]{2}[A-Z0-9]{10})(?:[/?]|$)/)?.[1] ?? 'unknown';
   const type=url.includes('/api/') ? 'chart' : 'page';
+  const selected = type === 'page' && target?.isin === isin && eligibleArchiveTarget(target) ? target : null;
+  const unavailable = () => selected ? strategyIssuerSamples(selected, null) : [];
   let response: Response;
   try { response=await fetch(url,{...options,cache:'no-store'}); }
-  catch(e) { await persistFetch({id,source:'vontobel',operation:type,instrument:`ISIN:${isin}`,startedAt,success:false,measurement:'http_request',errorCode:'network_error',samples:[]});throw e; }
+  catch(e) { await persistFetch({id,source:'vontobel',operation:type,instrument:`ISIN:${isin}`,startedAt,success:false,measurement:'http_request',errorCode:'network_error',samples:unavailable()});throw e; }
   let samples:Sample[]=[],bytes:number|undefined,errorCode:string|undefined;
-  try { const text=await response.clone().text();bytes=Buffer.byteLength(text,'utf8');if(response.ok)samples=vontobelSamples(text,isin,type); }
-  catch { errorCode='payload_parse_error'; }
+  try {
+    const text = await response.clone().text();
+    bytes = Buffer.byteLength(text, 'utf8');
+    samples = !response.ok ? unavailable() : selected ? strategyIssuerPageSamples(text, selected) : vontobelSamples(text, isin, type);
+    if (selected && samples[0]?.metadata?.status === 'unavailable') errorCode = 'issuer_status_unavailable';
+  } catch {
+    errorCode = 'payload_parse_error';
+    samples = unavailable();
+  }
   if(!response.ok)errorCode=`http_${response.status}`;
   else if(!samples.length&&!errorCode)errorCode='no_supported_points';
   await persistFetch({id,source:'vontobel',operation:type,instrument:`ISIN:${isin}`,startedAt,success:response.ok && !errorCode,measurement:'http_request',httpStatus:response.status,responseBytes:bytes,samples,errorCode});

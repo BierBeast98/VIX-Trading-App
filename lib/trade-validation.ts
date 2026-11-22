@@ -18,6 +18,9 @@ export const tradeFields = z.object({
   ratio: optionalPrice,
   entryPrice: optionalPrice,
   exitPrice: optionalExitPrice,
+  entryFees: optionalExitPrice,
+  exitFees: optionalExitPrice,
+  taxWithheld: optionalExitPrice,
   quantity: z.number().int().positive().optional().nullable(),
   returnPct: z.number().finite().min(-100).optional().nullable(),
   // Accepted for older clients; always derived from the dates on the server.
@@ -33,6 +36,12 @@ export const createTradeSchema = tradeFields.extend({
   notes: z.string().default(""),
 }).strict();
 export const updateTradeSchema = tradeFields.partial().strict();
+
+export function validateTradeClosingCosts(exitDate: Date | null, costs: { exitFees?: number | null; taxWithheld?: number | null }) {
+  if (!exitDate && (costs.exitFees != null || costs.taxWithheld != null)) {
+    throw new z.ZodError([{ code: "custom", path: ["exitDate"], message: "Verkaufsgebühren und Steuerabzug brauchen ein Ausstiegsdatum" }]);
+  }
+}
 
 export function tradeDerivedValues(trade: {
   entryDate: Date; exitDate: Date | null;
@@ -76,4 +85,6 @@ export const closePositionSchema = z.object({
   exitDate: date,
   exitPrice: z.number().finite().nonnegative(),
   quantity: z.number().int().positive(),
+  exitFees: optionalExitPrice,
+  taxWithheld: optionalExitPrice,
 }).strict();
